@@ -1,0 +1,41 @@
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+
+database:
+  postgres:
+    host: "postgres"
+    port: 5432
+    database: "autoops"
+    user: "postgres"
+    password: "postgres"
+  mongodb:
+    uri: "mongodb://mongo:27017"
+    database: "autoops"
+
+redis:
+  host: "redis"
+  port: 6379
+  db: 0
+
+ai:
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+    model: "gpt-4"
+  langchain:
+    temperature: 0.7
+    max_tokens: 2000
+
+integrations:
+  slack:
+    enabled: false
+    token: "${SLACK_TOKEN}"
+  twilio:
+    enabled: false
+    account_sid: "${TWILIO_ACCOUNT_SID}"
+    auth_token: "${TWILIO_AUTH_TOKEN}"
+
+storage:
+  path: "./storage"
+  max_file_size: 10485760  # 10MB
