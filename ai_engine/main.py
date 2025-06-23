@@ -1,39 +1,51 @@
+import os
+import yaml
 from fastapi import FastAPI
+from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
-from .routers import task_router, workflow_router, execution_router
-from .trigger_engine import TriggerEngine
-from .database import engine, create_db_and_tables
-import threading
+from ai_engine.database import create_db_and_tables
+from ai_engine.routers import task_router, workflow_router, execution_router
 
-app = FastAPI(title="HR Interview Automation")
+# load environment variables from .env
+load_dotenv()
 
-# CORS middleware
+# load configuration
+with open("config/default.yaml", "r") as f:
+    config = yaml.safe_load(f)
+
+app = FastAPI(title="AutoOps API")
+
+# Add CORS middleware to allow requests from the dashboard UI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all origins
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
 )
 
-# Include routers
-app.include_router(task_router.router, prefix="/api/tasks")
-app.include_router(workflow_router.router, prefix="/api/workflows")
-app.include_router(execution_router.router, prefix="/api/executions")
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
 
-# Initialize trigger engine
-trigger_engine = TriggerEngine()
+@app.get("/ping")
+async def ping():
+    return {"message": "pong"}
+
+# Include routers
+app.include_router(task_router.router, prefix="/api")
+app.include_router(workflow_router.router, prefix="/api")
+app.include_router(execution_router.router, prefix="/api")
 
 @app.on_event("startup")
-async def startup_event():
+async def on_startup():
     create_db_and_tables()
-    # Start trigger engine in background thread
-    threading.Thread(target=trigger_engine.start, daemon=True).start()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    trigger_engine.stop()
-
-@app.get("/")
-async def root():
-    return {"message": "HR Interview Automation API"} 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=config["server"]["host"],
+        port=config["server"]["port"],
+        reload=True
+    )

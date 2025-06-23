@@ -1,5 +1,4 @@
 from sqlmodel import Session, SQLModel, create_engine
-from contextlib import contextmanager
 import os
 from dotenv import load_dotenv
 
@@ -12,7 +11,6 @@ engine = create_engine(DATABASE_URL)
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
 
-@contextmanager
 def get_session():
     session = Session(engine)
     try:
