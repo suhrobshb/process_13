@@ -5,13 +5,13 @@ from .models.execution import Execution
 from .database import get_session
 from datetime import datetime
 from croniter import croniter
-import time
 import os
 import zipfile
 import json
 import tempfile
 import shutil
 from .task_detection import TaskDetection
+from .workflow_engine import execute_workflow_by_id
 
 @celery_app.task
 def process_task(task_id: int):
@@ -74,38 +74,14 @@ def process_task(task_id: int):
 
 @celery_app.task
 def execute_workflow(workflow_id: int):
-    """Execute a workflow and create an execution record."""
-    with get_session() as session:
-        workflow = session.get(Workflow, workflow_id)
-        if not workflow:
-            return {"status": "error", "message": "Workflow not found"}
-        
-        # Create execution record
-        execution = Execution(
-            workflow_id=workflow_id,
-            status="running",
-            started_at=datetime.utcnow()
-        )
-        session.add(execution)
-        session.commit()
-        
-        try:
-            # Simulate workflow execution
-            time.sleep(10)
-            
-            execution.status = "completed"
-            execution.completed_at = datetime.utcnow()
-            session.add(execution)
-            session.commit()
-            
-            return {"status": "success", "execution_id": execution.id}
-        except Exception as e:
-            execution.status = "failed"
-            execution.error = str(e)
-            session.add(execution)
-            session.commit()
-            
-            return {"status": "error", "message": str(e)}
+    """
+    Execute a workflow using the new WorkflowEngine.
+
+    This delegates the heavy-lifting to `execute_workflow_by_id`, which
+    handles creation of the Execution record, step dispatch, approvals,
+    result collection, and status updates.
+    """
+    return execute_workflow_by_id(workflow_id)
 
 @celery_app.task
 def enqueue_scheduled_workflows():

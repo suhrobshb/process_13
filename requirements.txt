@@ -5,7 +5,7 @@ python-dotenv>=0.19.0
 pyyaml
 
 # AI / ML
-openai
+openai>=1.0.0,<2.0.0
 onnxruntime
 langchain
 
@@ -37,5 +37,40 @@ slack-sdk
 # Utilities
 python-multipart
 
+# -------------------------------------------------------------------
+# Authentication / Security
+# -------------------------------------------------------------------
+# JWT & cryptography helpers
+python-jose[cryptography]>=3.3.0
+# Password hashing (bcrypt)
+passlib[bcrypt]>=1.7.4
+# Email validation helper
+email-validator>=2.1.0
+
+# HTTP client used by HttpRunner
+requests>=2.31.0
+
 # Added from the code block
 sqlmodel
+
+# -------------------------------------------------------------------
+# Production server
+# -------------------------------------------------------------------
+# WSGI/ASGI production server
+gunicorn>=20.1.0
+
+# -------------------------------------------------------------------
+# Testing dependencies
+# -------------------------------------------------------------------
+# Pytest framework for unit & integration tests
+pytest>=8.0.0
+# Plugin for simple fixture-based mocking
+pytest-mock>=3.12.0
+# Library to mock out HTTP requests in tests
+responses>=0.25.0
+
+# -------------------------------------------------------------------
+# NEW – Browser automation & related test utilities
+# -------------------------------------------------------------------
+playwright>=1.42.0       # Headless / headed browser automation
+pytest-playwright>=0.4.4 # Playwright helpers for test-suite

@@ -75,16 +75,26 @@
     <div class="button-container">
         <button id="startBtn">Start Recording</button>
         <button id="stopBtn" disabled>Stop Recording</button>
+        <label style="display:flex;align-items:center;gap:0.25rem;">
+            <input type="checkbox" id="autoUpload" checked />
+            <span style="font-size:0.9rem;">Auto-upload</span>
+        </label>
     </div>
     
     <div id="status">Ready to record. Click "Start Recording" to begin.</div>
     
     <h3>Response:</h3>
     <pre id="response">No data yet</pre>
+
+    <div style="margin-top:1.5rem;">
+        <a id="backBtn" href="/" style="display:none;padding:0.75rem 1.5rem;background:#3182ce;color:#fff;border-radius:4px;text-decoration:none;">Back to Dashboard</a>
+    </div>
     
     <script>
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
+        const autoUploadCb = document.getElementById('autoUpload');
+        const backBtn = document.getElementById('backBtn');
         const statusEl = document.getElementById('status');
         const responseEl = document.getElementById('response');
         
@@ -125,7 +135,7 @@
                 statusEl.textContent = "Stopping recording...";
                 statusEl.className = "";
                 
-                const response = await fetch('http://localhost:8001/stop', {
+                const response = await fetch(`http://localhost:8001/stop?auto_upload=${autoUploadCb.checked}`, {
                     method: 'POST'
                 });
                 
@@ -134,9 +144,18 @@
                 
                 if (response.ok) {
                     isRecording = false;
-                    statusEl.textContent = `Recording stopped. Output saved to: ${data.output_dir}`;
-                    statusEl.className = "success";
+                    if (data.upload_status === 'uploaded') {
+                        statusEl.textContent = `Recording stopped and uploaded successfully. Output dir: ${data.output_dir}`;
+                        statusEl.className = "success";
+                    } else if (data.upload_status && data.upload_status.startsWith('upload_failed')) {
+                        statusEl.textContent = `Recording stopped but upload failed: ${data.upload_status}`;
+                        statusEl.className = "error";
+                    } else {
+                        statusEl.textContent = `Recording stopped. Output saved to: ${data.output_dir}`;
+                        statusEl.className = "success";
+                    }
                     startBtn.disabled = false;
+                    backBtn.style.display = 'inline-block';
                 } else {
                     throw new Error(`Failed to stop recording: ${data.detail || 'Unknown error'}`);
                 }
@@ -149,6 +168,7 @@
                 } else {
                     startBtn.disabled = false;
                 }
+                backBtn.style.display = 'inline-block';
             }
         });
     </script>

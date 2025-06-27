@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # local import – recorder that captures multi-monitor events
 # use full package path so it works when launched from repo root
 from agent.recorder.multi_monitor_capture import MultiMonitorCapture
+# upload helper
+from agent.uploader import upload_recording
 
 app = FastAPI(
     title="AutoOps Agent Control",
@@ -46,16 +48,31 @@ def start_recording_get():
 
 
 @app.post("/stop")
-def stop_recording():
+def stop_recording(auto_upload: bool = True):
     """Stop capture and return output directory."""
     if not getattr(recorder, "_running", False):
         raise HTTPException(400, "Not recording right now")
 
     recorder.stop()
-    return {"status": "recording_stopped", "output_dir": recorder.output_dir}
+    # auto-upload
+    upload_result = None
+    if auto_upload:
+        upload_url = os.getenv("TASK_UPLOAD_URL", "http://localhost:8000/api/tasks/upload")
+        try:
+            upload_recording(recorder.output_dir, upload_url)
+            upload_result = "uploaded"
+        except Exception as exc:  # pylint: disable=broad-except
+            # Log the error but do not fail the stop endpoint
+            upload_result = f"upload_failed: {exc}"
+
+    return {
+        "status": "recording_stopped",
+        "output_dir": recorder.output_dir,
+        "upload_status": upload_result,
+    }
 
 
 @app.get("/stop")
-def stop_recording_get():
+def stop_recording_get(auto_upload: bool = True):
     """GET wrapper for /stop (calls the same logic)."""
-    return stop_recording()
+    return stop_recording(auto_upload=auto_upload)

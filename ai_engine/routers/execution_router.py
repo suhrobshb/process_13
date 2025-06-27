@@ -5,9 +5,19 @@ from sqlmodel import Session, select
 from ..database import get_session
 from ..models.execution import Execution
 from ..tasks import execute_workflow
+from ..workflow_engine import approve_workflow_step
 from sse_starlette.sse import EventSourceResponse
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/executions", tags=["executions"])
+
+class ApprovalRequest(BaseModel):
+    """
+    Request body for approving or rejecting a human-in-the-loop step.
+    """
+    approval_id: str = Field(..., description="ID returned by the approval step")
+    approved: bool = Field(True, description="Set False to reject")
+    comments: Optional[str] = Field(None, description="Optional reviewer comments")
 
 @router.post("/", response_model=Execution)
 def create_execution(execution: Execution, session: Session = Depends(get_session)):
@@ -71,9 +81,44 @@ def stream_execution(exec_id: int):
                     "event": "status",
                     "id": exec_id,
                     "status": ex.status,
-                    "updated_at": ex.updated_at.isoformat()
+                    "updated_at": ex.updated_at.isoformat(),
+                    "error": ex.error,
+                    "result": ex.result
                 }
                 if ex.status in ("completed","failed"):
                     break
             time.sleep(1)
     return EventSourceResponse(event_generator()) 
+
+# --------------------------------------------------------------------------- #
+#                             Approval End-point                              #
+# --------------------------------------------------------------------------- #
+
+@router.post("/{exec_id}/approve")
+def approve_execution(
+    exec_id: int,
+    payload: ApprovalRequest,
+    session: Session = Depends(get_session)
+):
+    """
+    Approve (or reject) a workflow step that is awaiting human approval.
+    """
+    # Ensure execution exists
+    ex = session.get(Execution, exec_id)
+    if not ex:
+        raise HTTPException(404, "Execution not found")
+
+    if ex.status != "waiting_approval":
+        raise HTTPException(400, "Execution is not waiting for approval")
+
+    # Delegate to workflow_engine helper
+    result = approve_workflow_step(
+        execution_id=exec_id,
+        approval_id=payload.approval_id,
+        approved=payload.approved,
+        comments=payload.comments,
+    )
+
+    # Refresh execution record after approval processing
+    session.refresh(ex)
+    return {"execution": ex, "engine_result": result}

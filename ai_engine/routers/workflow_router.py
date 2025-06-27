@@ -14,7 +14,13 @@ def create_workflow(workflow: Workflow, session: Session = Depends(get_session))
 
 @router.get("/", response_model=List[Workflow])
 def list_workflows(skip: int = 0, limit: int = 100, session: Session = Depends(get_session)):
-    return session.query(Workflow).offset(skip).limit(limit).all()
+    """
+    Return a paginated list of workflows using SQLModel's modern `select`
+    syntax instead of the legacy `session.query(...)` API (which produces
+    SAWarning messages with SQLAlchemy 2.x).
+    """
+    statement = select(Workflow).offset(skip).limit(limit)
+    return session.exec(statement).all()
 
 @router.get("/{workflow_id}", response_model=Workflow)
 def get_workflow(workflow_id: int, session: Session = Depends(get_session)):
@@ -26,7 +32,9 @@ def get_workflow(workflow_id: int, session: Session = Depends(get_session)):
 def update_workflow(workflow_id: int, data: Workflow, session: Session = Depends(get_session)):
     wf = session.get(Workflow, workflow_id)
     if not wf: raise HTTPException(404,"Workflow not found")
-    for k,v in data.dict(exclude_unset=True).items():
+    # SQLModel ≥ 0.0.14 deprecates `.dict()` in favour of `.model_dump()`
+    # Use the new API to silence deprecation warnings.
+    for k, v in data.model_dump(exclude_unset=True).items():
         setattr(wf, k, v)
     session.add(wf); session.commit(); session.refresh(wf)
     return wf

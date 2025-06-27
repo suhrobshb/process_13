@@ -1,0 +1,499 @@
+{
+  "version": "1.0",
+  "categories": {
+    "http": {
+      "title": "HTTP Requests",
+      "description": "Actions for interacting with external APIs and web services",
+      "actions": [
+        {
+          "id": "http_get_json",
+          "name": "GET JSON Data",
+          "description": "Fetch JSON data from a REST API endpoint",
+          "type": "http",
+          "params": {
+            "url": "https://api.example.com/data",
+            "method": "GET",
+            "headers": {
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "timeout": 30,
+            "verify_ssl": true
+          }
+        },
+        {
+          "id": "http_post_json",
+          "name": "POST JSON Data",
+          "description": "Send JSON data to a REST API endpoint",
+          "type": "http",
+          "params": {
+            "url": "https://api.example.com/data",
+            "method": "POST",
+            "headers": {
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            "json": {
+              "key": "value"
+            },
+            "timeout": 30,
+            "verify_ssl": true
+          }
+        },
+        {
+          "id": "http_webhook_notification",
+          "name": "Send Webhook Notification",
+          "description": "Send a notification to a webhook URL",
+          "type": "http",
+          "params": {
+            "url": "https://hooks.slack.com/services/YOUR_WEBHOOK_PATH",
+            "method": "POST",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "json": {
+              "text": "Workflow notification: ${message}"
+            },
+            "timeout": 10,
+            "verify_ssl": true
+          }
+        },
+        {
+          "id": "http_download_file",
+          "name": "Download File",
+          "description": "Download a file from a URL",
+          "type": "http",
+          "params": {
+            "url": "https://example.com/files/document.pdf",
+            "method": "GET",
+            "headers": {},
+            "timeout": 60,
+            "verify_ssl": true,
+            "stream": true
+          }
+        },
+        {
+          "id": "http_api_auth",
+          "name": "Authenticated API Request",
+          "description": "Make an authenticated request to an API",
+          "type": "http",
+          "params": {
+            "url": "https://api.example.com/protected-resource",
+            "method": "GET",
+            "headers": {
+              "Authorization": "Bearer ${api_token}",
+              "Accept": "application/json"
+            },
+            "timeout": 30,
+            "verify_ssl": true
+          }
+        }
+      ]
+    },
+    "shell": {
+      "title": "Shell Commands",
+      "description": "Actions for executing shell commands and scripts",
+      "actions": [
+        {
+          "id": "shell_list_files",
+          "name": "List Files",
+          "description": "List files in a directory",
+          "type": "shell",
+          "params": {
+            "command": "ls -la ${directory:-./}",
+            "timeout": 10,
+            "shell": true
+          }
+        },
+        {
+          "id": "shell_git_clone",
+          "name": "Git Clone",
+          "description": "Clone a Git repository",
+          "type": "shell",
+          "params": {
+            "command": "git clone ${repository_url} ${target_directory:-./repo}",
+            "timeout": 300,
+            "shell": true
+          }
+        },
+        {
+          "id": "shell_run_script",
+          "name": "Run Script",
+          "description": "Execute a script file",
+          "type": "shell",
+          "params": {
+            "command": "bash ${script_path} ${arguments:-}",
+            "timeout": 120,
+            "shell": true
+          }
+        },
+        {
+          "id": "shell_system_info",
+          "name": "System Information",
+          "description": "Get system information",
+          "type": "shell",
+          "params": {
+            "command": "uname -a && df -h && free -m",
+            "timeout": 10,
+            "shell": true
+          }
+        },
+        {
+          "id": "shell_process_csv",
+          "name": "Process CSV File",
+          "description": "Process a CSV file using command line tools",
+          "type": "shell",
+          "params": {
+            "command": "cat ${csv_file} | awk -F, '${awk_pattern:-print $0}'",
+            "timeout": 30,
+            "shell": true
+          }
+        },
+        {
+          "id": "shell_backup_file",
+          "name": "Backup File",
+          "description": "Create a backup of a file",
+          "type": "shell",
+          "params": {
+            "command": "cp ${source_file} ${source_file}.backup-$(date +%Y%m%d-%H%M%S)",
+            "timeout": 30,
+            "shell": true
+          }
+        }
+      ]
+    },
+    "llm": {
+      "title": "Language Model Actions",
+      "description": "Actions for text generation and processing using language models",
+      "actions": [
+        {
+          "id": "llm_summarize_text",
+          "name": "Summarize Text",
+          "description": "Generate a concise summary of a longer text",
+          "type": "llm",
+          "params": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "prompt": "Please summarize the following text in a concise way, highlighting the key points:\n\n${text_to_summarize}",
+            "temperature": 0.3,
+            "max_tokens": 300
+          }
+        },
+        {
+          "id": "llm_generate_email",
+          "name": "Generate Email",
+          "description": "Generate a professional email based on key points",
+          "type": "llm",
+          "params": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "prompt": "Write a professional email with the following details:\n- Recipient: ${recipient}\n- Subject: ${subject}\n- Key points: ${key_points}\n- Tone: ${tone:-professional}\n\nPlease format it as a complete email with greeting and signature.",
+            "temperature": 0.7,
+            "max_tokens": 500
+          }
+        },
+        {
+          "id": "llm_classify_content",
+          "name": "Classify Content",
+          "description": "Classify content into predefined categories",
+          "type": "llm",
+          "params": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "prompt": "Classify the following content into one of these categories: ${categories}.\n\nContent: ${content}\n\nReturn only the category name without explanation.",
+            "temperature": 0.2,
+            "max_tokens": 50
+          }
+        },
+        {
+          "id": "llm_translate_text",
+          "name": "Translate Text",
+          "description": "Translate text from one language to another",
+          "type": "llm",
+          "params": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "prompt": "Translate the following text from ${source_language} to ${target_language}:\n\n${text_to_translate}\n\nProvide only the translation without explanations.",
+            "temperature": 0.3,
+            "max_tokens": 1000
+          }
+        },
+        {
+          "id": "llm_code_review",
+          "name": "Code Review",
+          "description": "Review code for issues and suggest improvements",
+          "type": "llm",
+          "params": {
+            "provider": "openai",
+            "model": "gpt-4",
+            "prompt": "Review the following ${language} code for bugs, security issues, and potential improvements:\n\n```${language}\n${code}\n```\n\nProvide specific feedback with line numbers where applicable.",
+            "temperature": 0.2,
+            "max_tokens": 1000
+          }
+        }
+      ]
+    },
+    "decision": {
+      "title": "Decision Actions",
+      "description": "Actions for making decisions and controlling workflow paths",
+      "actions": [
+        {
+          "id": "decision_simple_condition",
+          "name": "Simple Condition",
+          "description": "Evaluate a simple condition and choose a path",
+          "type": "decision",
+          "params": {
+            "conditions": [
+              {
+                "expression": "${value} > ${threshold}",
+                "target": "high_value_path"
+              },
+              {
+                "expression": "${value} <= ${threshold}",
+                "target": "low_value_path"
+              }
+            ],
+            "default": "default_path"
+          }
+        },
+        {
+          "id": "decision_multi_branch",
+          "name": "Multi-Branch Decision",
+          "description": "Choose between multiple paths based on conditions",
+          "type": "decision",
+          "params": {
+            "conditions": [
+              {
+                "expression": "${status} == 'success'",
+                "target": "success_path"
+              },
+              {
+                "expression": "${status} == 'failure'",
+                "target": "failure_path"
+              },
+              {
+                "expression": "${status} == 'pending'",
+                "target": "retry_path"
+              }
+            ],
+            "default": "unknown_status_path"
+          }
+        },
+        {
+          "id": "decision_data_validation",
+          "name": "Data Validation",
+          "description": "Validate data and choose path based on validity",
+          "type": "decision",
+          "params": {
+            "conditions": [
+              {
+                "expression": "'${email}' and '@' in '${email}' and '.' in '${email}'.split('@')[1]",
+                "target": "valid_email_path"
+              },
+              {
+                "expression": "len('${phone}') >= 10 and '${phone}'.replace('+', '').replace('-', '').replace(' ', '').isdigit()",
+                "target": "valid_phone_path"
+              }
+            ],
+            "default": "invalid_data_path"
+          }
+        },
+        {
+          "id": "decision_threshold_check",
+          "name": "Threshold Check",
+          "description": "Check if values exceed thresholds and trigger appropriate paths",
+          "type": "decision",
+          "params": {
+            "conditions": [
+              {
+                "expression": "${cpu_usage} > 90 or ${memory_usage} > 90",
+                "target": "critical_alert_path"
+              },
+              {
+                "expression": "${cpu_usage} > 75 or ${memory_usage} > 75",
+                "target": "warning_alert_path"
+              },
+              {
+                "expression": "${cpu_usage} > 50 or ${memory_usage} > 50",
+                "target": "notice_alert_path"
+              }
+            ],
+            "default": "normal_operation_path"
+          }
+        }
+      ]
+    },
+    "approval": {
+      "title": "Approval Actions",
+      "description": "Actions for human-in-the-loop approvals",
+      "actions": [
+        {
+          "id": "approval_basic",
+          "name": "Basic Approval",
+          "description": "Request a basic approval from a user",
+          "type": "approval",
+          "params": {
+            "title": "Approval Required",
+            "description": "Please review and approve this workflow step.",
+            "approvers": ["${approver_email}"],
+            "timeout_hours": 24,
+            "notification_method": "email",
+            "wait": true
+          }
+        },
+        {
+          "id": "approval_multi_approver",
+          "name": "Multi-Approver Workflow",
+          "description": "Request approval from multiple users",
+          "type": "approval",
+          "params": {
+            "title": "${approval_title:-Multi-Approver Workflow}",
+            "description": "This action requires approval from multiple users before proceeding.",
+            "approvers": ["${approver1_email}", "${approver2_email}", "${approver3_email}"],
+            "required_approvals": 2,
+            "timeout_hours": 48,
+            "notification_method": "email",
+            "wait": true
+          }
+        },
+        {
+          "id": "approval_deployment",
+          "name": "Deployment Approval",
+          "description": "Request approval for a deployment",
+          "type": "approval",
+          "params": {
+            "title": "Deployment Approval: ${environment}",
+            "description": "Please review and approve the deployment to ${environment} environment.\n\nChanges included:\n${changes_description}",
+            "approvers": ["${team_lead_email}", "${manager_email}"],
+            "required_approvals": 1,
+            "timeout_hours": 24,
+            "notification_method": "slack",
+            "wait": true
+          }
+        },
+        {
+          "id": "approval_expenditure",
+          "name": "Expenditure Approval",
+          "description": "Request approval for a financial expenditure",
+          "type": "approval",
+          "params": {
+            "title": "Expenditure Approval: $${amount}",
+            "description": "Please review and approve the expenditure of $${amount} for ${purpose}.\n\nRequested by: ${requester_name}\nDepartment: ${department}\nJustification: ${justification}",
+            "approvers": ["${finance_manager_email}"],
+            "timeout_hours": 72,
+            "notification_method": "email",
+            "wait": true
+          }
+        },
+        {
+          "id": "approval_async",
+          "name": "Asynchronous Approval",
+          "description": "Create an approval request but don't wait for completion",
+          "type": "approval",
+          "params": {
+            "title": "Approval Required: ${title}",
+            "description": "${description}",
+            "approvers": ["${approver_email}"],
+            "timeout_hours": 168,
+            "notification_method": "email",
+            "wait": false
+          }
+        }
+      ]
+    },
+
+    /* ------------------------------------------------------------------
+       NEW CATEGORY – Desktop Automation (PyAutoGUI)
+       ------------------------------------------------------------------ */
+    "desktop": {
+      "title": "Desktop Automation",
+      "description": "Actions for automating desktop interactions with PyAutoGUI",
+      "actions": [
+        {
+          "id": "desktop_click_sequence",
+          "name": "Click Sequence",
+          "description": "Perform a sequence of mouse clicks on screen coordinates",
+          "type": "desktop",
+          "params": {
+            "actions": [
+              { "type": "click", "x": 200, "y": 300, "button": "left", "clicks": 1 },
+              { "type": "wait", "duration": 0.5 },
+              { "type": "double_click", "x": 450, "y": 320 }
+            ],
+            "timeout": 30
+          }
+        },
+        {
+          "id": "desktop_type_text",
+          "name": "Type Text",
+          "description": "Open an application (assumed focused) and type text",
+          "type": "desktop",
+          "params": {
+            "actions": [
+              { "type": "hotkey", "keys": ["ctrl", "n"] },
+              { "type": "wait", "duration": 1 },
+              { "type": "type", "text": "Automated text typed by AI Engine!", "interval": 0.05 }
+            ],
+            "timeout": 45
+          }
+        }
+      ]
+    },
+
+    /* ------------------------------------------------------------------
+       NEW CATEGORY – Browser Automation (Playwright)
+       ------------------------------------------------------------------ */
+    "browser": {
+      "title": "Browser Automation",
+      "description": "Actions for automating browsers using Playwright",
+      "actions": [
+        {
+          "id": "browser_fill_login_form",
+          "name": "Fill Login Form",
+          "description": "Navigate to a URL, fill a login form, and submit",
+          "type": "browser",
+          "params": {
+            "browser_type": "chromium",
+            "headless": true,
+            "actions": [
+              { "type": "goto", "url": "https://example.com/login" },
+              { "type": "fill", "selector": "#username", "text": "${username}" },
+              { "type": "fill", "selector": "#password", "text": "${password}" },
+              { "type": "click", "selector": "button[type='submit']" },
+              { "type": "wait_for_navigation", "wait_until": "networkidle" },
+              { "type": "screenshot", "filename": "after_login.png" }
+            ],
+            "timeout": 90
+          }
+        }
+      ]
+    },
+
+    /* ------------------------------------------------------------------
+       ENHANCED LLM ACTION – Chat Completion with JSON mode
+       ------------------------------------------------------------------ */
+    "llm": {
+      "title": "Language Model Actions",
+      "description": "Actions for text generation and processing using language models",
+      "actions": [
+        {
+          "id": "llm_chat_completion",
+          "name": "Chat Completion (Structured JSON)",
+          "description": "Use an LLM to generate a structured JSON response based on a prompt",
+          "type": "llm",
+          "params": {
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "prompt": [
+              { "role": "system", "content": "You are a data extraction assistant that returns JSON." },
+              { "role": "user", "content": "Extract name and email from the following text:\\n${input_text}" }
+            ],
+            "temperature": 0.1,
+            "max_tokens": 150,
+            "response_format": "json_object"
+          }
+        }
+      ]
+    }
+  }
+}
