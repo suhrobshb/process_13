@@ -1,725 +1,231 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ENDPOINTS } from '../config';
 
-/**
- * ExecutionMonitor Component
- * --------------------------
- * Monitors and displays the status and details of a workflow execution.
- * Provides real-time updates using server-sent events and allows for
- * interaction with the execution (approvals, retries, rollbacks).
- * 
- * Props:
- * - executionId: ID of the execution to monitor
- * - workflowId: ID of the workflow being executed
- * - onClose: Function to call when the monitor is closed
- */
-const ExecutionMonitor = ({ executionId, workflowId, onClose }) => {
-  // State for execution data and UI
-  const [execution, setExecution] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [approvalData, setApprovalData] = useState({
-    showApprovalForm: false,
-    approvalId: null,
-    comments: '',
-  });
-  
-  // Ref for SSE connection
-  const eventSourceRef = useRef(null);
-  
-  // Fetch initial execution data
-  useEffect(() => {
-    const fetchExecution = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch(ENDPOINTS.EXECUTION_BY_ID(executionId));
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch execution: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        setExecution(data);
-      } catch (err) {
-        console.error('Error fetching execution:', err);
-        setError(`Failed to load execution details: ${err.message}`);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (executionId) {
-      fetchExecution();
-    }
-  }, [executionId]);
-  
-  // Set up SSE for real-time updates
-  useEffect(() => {
-    if (!executionId) return;
-    
-    // Close any existing connection
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
-    
-    // Create new EventSource connection
-    const eventSource = new EventSource(ENDPOINTS.EXECUTION_BY_ID(executionId) + '/stream');
-    eventSourceRef.current = eventSource;
-    
-    // Handle incoming events
-    eventSource.addEventListener('status', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setExecution(prevExecution => {
-          if (!prevExecution) return data;
-          
-          return {
-            ...prevExecution,
-            status: data.status,
-            updated_at: data.updated_at,
-            error: data.error,
-            result: data.result
-          };
-        });
-        
-        // If execution is complete or failed, close the connection
-        if (data.status === 'completed' || data.status === 'failed') {
-          eventSource.close();
-        }
-      } catch (err) {
-        console.error('Error parsing SSE data:', err);
-      }
-    });
-    
-    // Handle connection error
-    eventSource.onerror = (err) => {
-      console.error('SSE connection error:', err);
-      eventSource.close();
-    };
-    
-    // Cleanup on unmount
-    return () => {
-      eventSource.close();
-    };
-  }, [executionId]);
-  
-  // Handle approval submission
-  const handleApproval = async (approved) => {
-    try {
-      const response = await fetch(`${ENDPOINTS.EXECUTION_BY_ID(executionId)}/approve`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          approval_id: approvalData.approvalId,
-          approved,
-          comments: approvalData.comments,
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to submit approval: ${response.statusText}`);
-      }
-      
-      // Reset approval form
-      setApprovalData({
-        showApprovalForm: false,
-        approvalId: null,
-        comments: '',
-      });
-      
-      // Refresh execution data
-      const data = await response.json();
-      if (data.execution) {
-        setExecution(data.execution);
-      }
-    } catch (err) {
-      console.error('Error submitting approval:', err);
-      setError(`Failed to submit approval: ${err.message}`);
-    }
-  };
-  
-  // Handle retry for failed executions
-  const handleRetry = async () => {
-    try {
-      const response = await fetch(`${ENDPOINTS.EXECUTION_BY_ID(executionId)}/retry`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to retry execution: ${response.statusText}`);
-      }
-      
-      // Close this monitor and let the caller know to refresh
-      onClose();
-    } catch (err) {
-      console.error('Error retrying execution:', err);
-      setError(`Failed to retry execution: ${err.message}`);
-    }
-  };
-  
-  // Handle rollback for executions
-  const handleRollback = async () => {
-    try {
-      const response = await fetch(`${ENDPOINTS.EXECUTION_BY_ID(executionId)}/rollback`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to rollback execution: ${response.statusText}`);
-      }
-      
-      // Refresh execution data
-      const data = await response.json();
-      setExecution(prevExecution => ({
-        ...prevExecution,
-        status: data.status,
-      }));
-    } catch (err) {
-      console.error('Error rolling back execution:', err);
-      setError(`Failed to rollback execution: ${err.message}`);
-    }
-  };
-  
-  // Show approval form if needed
-  const showApprovalForm = (approvalId) => {
-    setApprovalData({
-      showApprovalForm: true,
-      approvalId,
-      comments: '',
-    });
-  };
-  
-  // Handle comments change in approval form
-  const handleCommentsChange = (e) => {
-    setApprovalData(prev => ({
-      ...prev,
-      comments: e.target.value,
-    }));
-  };
-  
-  // Format date for display
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString();
-  };
-  
-  // Get status badge class
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case 'running':
-        return 'status-running';
-      case 'completed':
-        return 'status-completed';
-      case 'failed':
-        return 'status-failed';
-      case 'waiting_approval':
-        return 'status-waiting';
-      default:
-        return 'status-pending';
-    }
-  };
-  
-  // Render step results
-  const renderStepResults = (results) => {
-    if (!results) return null;
-    
-    return (
-      <div className="step-results">
-        {Object.entries(results).map(([stepId, result]) => (
-          <div key={stepId} className="step-result">
-            <div className="step-header">
-              <span className="step-id">{stepId}</span>
-              <span className={`step-status ${result.success ? 'success' : 'error'}`}>
-                {result.success ? 'Success' : 'Failed'}
-              </span>
-            </div>
-            
-            {result.error && (
-              <div className="step-error">
-                <strong>Error:</strong> {result.error}
-              </div>
-            )}
-            
-            {result.result && (
-              <div className="step-output">
-                <div className="output-header">Output:</div>
-                <pre className="output-content">
-                  {JSON.stringify(result.result, null, 2)}
-                </pre>
-              </div>
-            )}
-            
-            {/* Show approval button if this step is waiting for approval */}
-            {result.result && result.result.status === 'pending' && result.result.approval_id && (
-              <button
-                className="approve-button"
-                onClick={() => showApprovalForm(result.result.approval_id)}
-              >
-                Approve/Reject
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  };
-  
-  // Render approval form
-  const renderApprovalForm = () => {
-    if (!approvalData.showApprovalForm) return null;
-    
-    return (
-      <div className="approval-form">
-        <h4>Approval Request</h4>
-        <div className="form-group">
-          <label htmlFor="comments">Comments:</label>
-          <textarea
-            id="comments"
-            value={approvalData.comments}
-            onChange={handleCommentsChange}
-            placeholder="Enter any comments or feedback"
-            rows={4}
-          />
+// --- Helper Components ---
+
+const StatusIcon = ({ status }) => {
+  const baseClasses = "w-6 h-6 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0";
+  switch (status) {
+    case 'running':
+      return (
+        <div className={`${baseClasses} bg-blue-500 animate-pulse`}>
+          <svg className="w-4 h-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
         </div>
-        <div className="button-group">
-          <button
-            className="approve-button"
-            onClick={() => handleApproval(true)}
-          >
-            Approve
-          </button>
-          <button
-            className="reject-button"
-            onClick={() => handleApproval(false)}
-          >
-            Reject
-          </button>
-          <button
-            className="cancel-button"
-            onClick={() => setApprovalData(prev => ({ ...prev, showApprovalForm: false }))}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    );
-  };
-  
-  // Main render
-  if (loading && !execution) {
-    return (
-      <div className="execution-monitor loading">
-        <div className="loading-spinner">Loading execution details...</div>
-      </div>
-    );
+      );
+    case 'completed':
+      return <div className={`${baseClasses} bg-green-500`}>✓</div>;
+    case 'failed':
+      return <div className={`${baseClasses} bg-red-500`}>!</div>;
+    case 'pending':
+    default:
+      return <div className={`${baseClasses} bg-gray-400`}>-</div>;
   }
-  
-  if (error && !execution) {
-    return (
-      <div className="execution-monitor error">
-        <div className="error-message">{error}</div>
-        <button className="close-button" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    );
-  }
-  
-  if (!execution) {
-    return (
-      <div className="execution-monitor error">
-        <div className="error-message">No execution data available</div>
-        <button className="close-button" onClick={onClose}>
-          Close
-        </button>
-      </div>
-    );
-  }
-  
+};
+
+const StepLog = ({ logs }) => {
+  if (!logs || logs.length === 0) return null;
   return (
-    <div className="execution-monitor">
-      <div className="monitor-header">
-        <h3>Workflow Execution #{executionId}</h3>
-        <button className="close-button" onClick={onClose}>
-          ✕
-        </button>
-      </div>
-      
-      {error && (
-        <div className="error-message">{error}</div>
-      )}
-      
-      <div className="execution-details">
-        <div className="detail-row">
-          <span className="detail-label">Status:</span>
-          <span className={`status-badge ${getStatusBadgeClass(execution.status)}`}>
-            {execution.status}
-          </span>
-        </div>
-        
-        <div className="detail-row">
-          <span className="detail-label">Started:</span>
-          <span className="detail-value">{formatDate(execution.started_at)}</span>
-        </div>
-        
-        {execution.completed_at && (
-          <div className="detail-row">
-            <span className="detail-label">Completed:</span>
-            <span className="detail-value">{formatDate(execution.completed_at)}</span>
+    <div className="mt-2 ml-12 p-3 bg-gray-800 text-gray-200 rounded-md font-mono text-xs max-h-40 overflow-y-auto">
+      {logs.map((log, index) => (
+        <div key={index} className="whitespace-pre-wrap">{log}</div>
+      ))}
+    </div>
+  );
+};
+
+// --- Main Execution Monitor Component ---
+
+const ExecutionMonitor = ({ executionId, workflowName, initialSteps, onClose }) => {
+  const [executionDetails, setExecutionDetails] = useState({
+    status: 'pending',
+    startTime: null,
+    endTime: null,
+    totalDuration: 0,
+  });
+  const [steps, setSteps] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const ws = useRef(null);
+
+  useEffect(() => {
+    // Initialize steps from props
+    if (initialSteps) {
+      setSteps(initialSteps.map(step => ({
+        ...step,
+        status: 'pending',
+        logs: [],
+        duration: null
+      })));
+    }
+
+    if (!executionId) return;
+
+    // --- WebSocket Connection ---
+    const wsUrl = `wss://your-backend-websocket-url/ws/executions/${executionId}`; // Replace with your actual WebSocket URL
+    ws.current = new WebSocket(wsUrl);
+
+    ws.current.onopen = () => {
+      console.log('WebSocket connection established');
+      setIsConnected(true);
+      setExecutionDetails(prev => ({ ...prev, status: 'running', startTime: new Date() }));
+    };
+
+    ws.current.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        handleWsMessage(message);
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+
+    ws.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setIsConnected(false);
+    };
+
+    ws.current.onclose = () => {
+      console.log('WebSocket connection closed');
+      setIsConnected(false);
+      // Finalize status if it hasn't been completed/failed already
+      setExecutionDetails(prev => ({
+        ...prev,
+        status: prev.status === 'running' ? 'completed' : prev.status,
+        endTime: prev.endTime || new Date(),
+      }));
+    };
+
+    // Cleanup on component unmount
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
+  }, [executionId, initialSteps]);
+  
+  // Update total duration whenever end time or start time changes
+  useEffect(() => {
+      if (executionDetails.startTime && executionDetails.endTime) {
+          const duration = (executionDetails.endTime - executionDetails.startTime) / 1000;
+          setExecutionDetails(prev => ({...prev, totalDuration: duration.toFixed(2)}));
+      }
+  }, [executionDetails.startTime, executionDetails.endTime]);
+
+  const handleWsMessage = (message) => {
+    const { type, payload } = message;
+    
+    switch (type) {
+      case 'WORKFLOW_STARTED':
+        setExecutionDetails({
+          status: 'running',
+          startTime: new Date(payload.startTime),
+          endTime: null,
+          totalDuration: 0,
+        });
+        break;
+      case 'STEP_UPDATE':
+        setSteps(prevSteps =>
+          prevSteps.map(step =>
+            step.id === payload.stepId
+              ? { ...step, status: payload.status, duration: payload.duration }
+              : step
+          )
+        );
+        break;
+      case 'STEP_LOG':
+        setSteps(prevSteps =>
+          prevSteps.map(step =>
+            step.id === payload.stepId
+              ? { ...step, logs: [...(step.logs || []), payload.log] }
+              : step
+          )
+        );
+        break;
+      case 'WORKFLOW_COMPLETED':
+        setExecutionDetails(prev => ({
+          ...prev,
+          status: 'completed',
+          endTime: new Date(payload.endTime),
+        }));
+        break;
+      case 'WORKFLOW_FAILED':
+        setExecutionDetails(prev => ({
+          ...prev,
+          status: 'failed',
+          endTime: new Date(payload.endTime),
+        }));
+        break;
+      default:
+        console.warn('Unknown WebSocket message type:', type);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl h-[90vh] flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Live Execution: {workflowName}</h2>
+          <div className="flex items-center text-sm text-gray-500 mt-1">
+            <div className={`w-3 h-3 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
+            {isConnected ? 'Connected' : 'Disconnected'}
           </div>
-        )}
-        
-        {execution.error && (
-          <div className="detail-row error">
-            <span className="detail-label">Error:</span>
-            <span className="detail-value error-text">{execution.error}</span>
-          </div>
-        )}
+        </div>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-800">&times;</button>
+      </div>
+
+      {/* Metrics Summary */}
+      <div className="p-4 bg-gray-50 grid grid-cols-3 gap-4">
+        <div className="text-center">
+          <div className="text-sm text-gray-500">Status</div>
+          <div className={`text-lg font-bold ${
+            executionDetails.status === 'completed' ? 'text-green-600' :
+            executionDetails.status === 'failed' ? 'text-red-600' :
+            'text-blue-600'
+          }`}>{executionDetails.status.toUpperCase()}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-sm text-gray-500">Start Time</div>
+          <div className="text-lg font-bold">{executionDetails.startTime ? new Date(executionDetails.startTime).toLocaleTimeString() : 'N/A'}</div>
+        </div>
+        <div className="text-center">
+          <div className="text-sm text-gray-500">Total Duration</div>
+          <div className="text-lg font-bold">{executionDetails.totalDuration}s</div>
+        </div>
+      </div>
+
+      {/* Steps Timeline */}
+      <div className="flex-grow p-4 overflow-y-auto">
+        <div className="space-y-4">
+          {steps.map((step, index) => (
+            <div key={step.id} className="p-3 bg-gray-50 rounded-lg">
+              <div className="flex items-center">
+                <StatusIcon status={step.status} />
+                <div className="ml-4 flex-grow">
+                  <div className="font-semibold text-gray-700">{step.data.label}</div>
+                  <div className="text-xs text-gray-500">Step {index + 1} / {steps.length}</div>
+                </div>
+                <div className="text-sm text-gray-500">
+                  {step.duration ? `${step.duration.toFixed(2)}s` : ''}
+                </div>
+              </div>
+              <StepLog logs={step.logs} />
+            </div>
+          ))}
+        </div>
       </div>
       
-      {/* Action buttons based on execution status */}
-      <div className="execution-actions">
-        {execution.status === 'failed' && (
-          <button className="retry-button" onClick={handleRetry}>
-            Retry Execution
-          </button>
-        )}
-        
-        {(execution.status === 'running' || execution.status === 'failed') && (
-          <button className="rollback-button" onClick={handleRollback}>
-            Rollback Execution
-          </button>
-        )}
-        
-        {execution.status === 'completed' && (
-          <button
-            className="new-execution-button"
-            onClick={() => {
-              // Trigger a new execution of the same workflow
-              fetch(`${ENDPOINTS.WORKFLOW_BY_ID(workflowId)}/trigger`, {
-                method: 'POST',
-              })
-                .then(response => {
-                  if (!response.ok) throw new Error('Failed to trigger workflow');
-                  return response.json();
-                })
-                .then(() => {
-                  onClose(); // Close this monitor after triggering
-                })
-                .catch(err => {
-                  console.error('Error triggering workflow:', err);
-                  setError(`Failed to trigger workflow: ${err.message}`);
-                });
-            }}
-          >
-            Run Again
-          </button>
-        )}
+      {/* Footer Actions */}
+      <div className="p-4 border-t bg-gray-50 flex justify-end space-x-2">
+          <button className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">View Full Log</button>
+          {executionDetails.status === 'failed' && (
+              <button className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700">Retry Failed Steps</button>
+          )}
+          {executionDetails.status === 'running' && (
+              <button className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700">Cancel Execution</button>
+          )}
       </div>
-      
-      {/* Show approval form if needed */}
-      {renderApprovalForm()}
-      
-      {/* Results section */}
-      <div className="results-section">
-        <h4>Execution Results</h4>
-        {execution.result ? (
-          renderStepResults(execution.result.results)
-        ) : (
-          <div className="no-results">No results available yet</div>
-        )}
-      </div>
-      
-      <style jsx>{`
-        .execution-monitor {
-          background: white;
-          border-radius: 6px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-          padding: 16px;
-          width: 100%;
-          max-width: 800px;
-          max-height: 80vh;
-          overflow-y: auto;
-        }
-        
-        .monitor-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 16px;
-          border-bottom: 1px solid #eee;
-          padding-bottom: 8px;
-        }
-        
-        .monitor-header h3 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 600;
-        }
-        
-        .close-button {
-          background: none;
-          border: none;
-          cursor: pointer;
-          font-size: 16px;
-          color: #666;
-        }
-        
-        .error-message {
-          color: #d32f2f;
-          padding: 8px 12px;
-          background: #ffebee;
-          border-radius: 4px;
-          margin-bottom: 16px;
-        }
-        
-        .execution-details {
-          margin-bottom: 20px;
-        }
-        
-        .detail-row {
-          display: flex;
-          margin-bottom: 8px;
-        }
-        
-        .detail-label {
-          font-weight: 600;
-          width: 100px;
-          flex-shrink: 0;
-        }
-        
-        .detail-value {
-          flex-grow: 1;
-        }
-        
-        .error-text {
-          color: #d32f2f;
-        }
-        
-        .status-badge {
-          display: inline-block;
-          padding: 4px 8px;
-          border-radius: 12px;
-          font-size: 12px;
-          font-weight: 600;
-          text-transform: uppercase;
-        }
-        
-        .status-pending {
-          background: #e0e0e0;
-          color: #616161;
-        }
-        
-        .status-running {
-          background: #bbdefb;
-          color: #1976d2;
-        }
-        
-        .status-completed {
-          background: #c8e6c9;
-          color: #388e3c;
-        }
-        
-        .status-failed {
-          background: #ffcdd2;
-          color: #d32f2f;
-        }
-        
-        .status-waiting {
-          background: #fff9c4;
-          color: #f57f17;
-        }
-        
-        .execution-actions {
-          display: flex;
-          gap: 10px;
-          margin-bottom: 20px;
-        }
-        
-        .retry-button,
-        .rollback-button,
-        .new-execution-button {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 4px;
-          font-weight: 500;
-          cursor: pointer;
-        }
-        
-        .retry-button {
-          background: #4caf50;
-          color: white;
-        }
-        
-        .rollback-button {
-          background: #ff9800;
-          color: white;
-        }
-        
-        .new-execution-button {
-          background: #2196f3;
-          color: white;
-        }
-        
-        .results-section {
-          margin-top: 20px;
-        }
-        
-        .results-section h4 {
-          margin-top: 0;
-          margin-bottom: 12px;
-          font-size: 16px;
-          font-weight: 600;
-        }
-        
-        .no-results {
-          color: #757575;
-          font-style: italic;
-        }
-        
-        .step-results {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-        }
-        
-        .step-result {
-          border: 1px solid #e0e0e0;
-          border-radius: 4px;
-          padding: 12px;
-        }
-        
-        .step-header {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 8px;
-        }
-        
-        .step-id {
-          font-weight: 600;
-        }
-        
-        .step-status {
-          padding: 2px 6px;
-          border-radius: 10px;
-          font-size: 12px;
-        }
-        
-        .step-status.success {
-          background: #c8e6c9;
-          color: #388e3c;
-        }
-        
-        .step-status.error {
-          background: #ffcdd2;
-          color: #d32f2f;
-        }
-        
-        .step-error {
-          margin-top: 8px;
-          color: #d32f2f;
-          padding: 8px;
-          background: #ffebee;
-          border-radius: 4px;
-        }
-        
-        .step-output {
-          margin-top: 8px;
-        }
-        
-        .output-header {
-          font-weight: 500;
-          margin-bottom: 4px;
-        }
-        
-        .output-content {
-          background: #f5f5f5;
-          padding: 8px;
-          border-radius: 4px;
-          overflow-x: auto;
-          font-size: 13px;
-          max-height: 200px;
-          overflow-y: auto;
-        }
-        
-        .approve-button {
-          margin-top: 12px;
-          padding: 6px 12px;
-          background: #4caf50;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-        }
-        
-        .approval-form {
-          margin-top: 20px;
-          padding: 16px;
-          background: #f5f5f5;
-          border-radius: 4px;
-        }
-        
-        .approval-form h4 {
-          margin-top: 0;
-          margin-bottom: 12px;
-        }
-        
-        .form-group {
-          margin-bottom: 16px;
-        }
-        
-        .form-group label {
-          display: block;
-          margin-bottom: 8px;
-          font-weight: 500;
-        }
-        
-        .form-group textarea {
-          width: 100%;
-          padding: 8px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-        }
-        
-        .button-group {
-          display: flex;
-          gap: 10px;
-        }
-        
-        .approve-button,
-        .reject-button,
-        .cancel-button {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 4px;
-          font-weight: 500;
-          cursor: pointer;
-        }
-        
-        .approve-button {
-          background: #4caf50;
-          color: white;
-        }
-        
-        .reject-button {
-          background: #f44336;
-          color: white;
-        }
-        
-        .cancel-button {
-          background: #9e9e9e;
-          color: white;
-        }
-        
-        .loading-spinner {
-          text-align: center;
-          padding: 20px;
-          color: #666;
-        }
-      `}</style>
     </div>
   );
 };

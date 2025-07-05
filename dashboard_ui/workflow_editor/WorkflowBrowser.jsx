@@ -1,478 +1,284 @@
-import React, { useState, useEffect } from 'react';
-import { ENDPOINTS } from '../config';
+import React, { useState, useEffect, useMemo } from 'react';
 
-/**
- * WorkflowBrowser Component
- * -------------------------
- * Displays a list of available workflows and provides actions to manage them.
- * 
- * Props:
- * - onSelectWorkflow: Function called when a workflow is selected for editing
- * - onCreateNew: Function called when user wants to create a new workflow
- * - className: Optional additional CSS classes
- */
-const WorkflowBrowser = ({ onSelectWorkflow, onCreateNew, className = '' }) => {
-  // State for workflows and UI state
+// --- Mock Data (replace with API call) ---
+const mockWorkflows = [
+  {
+    id: 1,
+    name: 'Automated Invoice Processing',
+    description: 'Processes vendor invoices from the accounting inbox.',
+    status: 'active',
+    confidence: 0.95,
+    lastRun: { date: '2025-06-27 10:30 AM', status: 'completed' },
+    successRate: 1.0,
+    tags: ['accounting', 'finance'],
+    createdBy: 'admin_user',
+    updatedAt: '2025-06-27 09:15:00Z',
+  },
+  {
+    id: 2,
+    name: 'AI-Assisted Contract Review',
+    description: 'Analyzes new contracts against company legal playbook.',
+    status: 'active',
+    confidence: 0.88,
+    lastRun: { date: '2025-06-26 15:45 PM', status: 'failed' },
+    successRate: 0.92,
+    tags: ['legal', 'compliance'],
+    createdBy: 'legal_team',
+    updatedAt: '2025-06-25 11:00:00Z',
+  },
+  {
+    id: 3,
+    name: 'New Employee Onboarding',
+    description: 'A workflow for setting up new hire accounts and access.',
+    status: 'draft',
+    confidence: 0.72,
+    lastRun: null,
+    successRate: null,
+    tags: ['hr', 'it'],
+    createdBy: 'hr_admin',
+    updatedAt: '2025-06-24 18:20:00Z',
+  },
+  {
+    id: 4,
+    name: 'Daily Social Media Posting',
+    description: 'Generates and posts daily updates to social channels.',
+    status: 'archived',
+    confidence: 0.98,
+    lastRun: { date: '2025-05-30 09:00 AM', status: 'completed' },
+    successRate: 1.0,
+    tags: ['marketing', 'social'],
+    createdBy: 'marketing_lead',
+    updatedAt: '2025-05-30 09:01:00Z',
+  },
+];
+
+// --- Helper Components ---
+
+const StatusBadge = ({ status }) => {
+  const styles = {
+    active: 'bg-green-100 text-green-800',
+    draft: 'bg-blue-100 text-blue-800',
+    archived: 'bg-gray-100 text-gray-800',
+  };
+  return (
+    <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${styles[status] || styles.archived}`}>
+      {status}
+    </span>
+  );
+};
+
+const ConfidenceBar = ({ score }) => {
+  let color = 'bg-green-500';
+  if (score < 0.9) color = 'bg-yellow-500';
+  if (score < 0.75) color = 'bg-red-500';
+
+  return (
+    <div className="w-full bg-gray-200 rounded-full h-2.5">
+      <div className={`${color} h-2.5 rounded-full`} style={{ width: `${score * 100}%` }}></div>
+    </div>
+  );
+};
+
+const ActionButton = ({ onClick, children, className, title }) => (
+  <button onClick={onClick} title={title} className={`p-1.5 rounded hover:bg-gray-200 ${className}`}>
+    {children}
+  </button>
+);
+
+// --- Main Component ---
+
+const WorkflowBrowser = ({ onSelectWorkflow, onCreateNew }) => {
   const [workflows, setWorkflows] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [actionInProgress, setActionInProgress] = useState(null);
-  const [successMessage, setSuccessMessage] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState({ field: 'updatedAt', direction: 'desc' });
 
-  // Fetch workflows on mount
+  // Fetch workflows from API on mount
   useEffect(() => {
+    const fetchWorkflows = async () => {
+      try {
+        setIsLoading(true);
+        // Replace with actual API call, e.g., await fetch('/api/workflows');
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
+        setWorkflows(mockWorkflows);
+        setError(null);
+      } catch (err) {
+        setError('Failed to load workflows. Please try again later.');
+        console.error(err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
     fetchWorkflows();
   }, []);
 
-  // Clear success message after 5 seconds
-  useEffect(() => {
-    if (successMessage) {
-      const timer = setTimeout(() => {
-        setSuccessMessage(null);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [successMessage]);
-
-  // Fetch workflows from API
-  const fetchWorkflows = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      
-      const response = await fetch(ENDPOINTS.WORKFLOWS);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch workflows: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      setWorkflows(data);
-    } catch (err) {
-      console.error('Error fetching workflows:', err);
-      setError('Failed to load workflows. Please try again later.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Handle workflow activation/deactivation
-  const handleToggleActive = async (workflow) => {
-    try {
-      setActionInProgress(workflow.id);
-      
-      const endpoint = workflow.status === 'active' 
-        ? `${ENDPOINTS.WORKFLOW_BY_ID(workflow.id)}/deactivate`
-        : `${ENDPOINTS.WORKFLOW_BY_ID(workflow.id)}/activate`;
-      
-      const response = await fetch(endpoint, {
-        method: 'POST',
+  // Memoized filtering and sorting logic
+  const filteredAndSortedWorkflows = useMemo(() => {
+    return workflows
+      .filter(wf => {
+        const matchesSearch = wf.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              wf.description.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesStatus = statusFilter === 'all' || wf.status === statusFilter;
+        return matchesSearch && matchesStatus;
+      })
+      .sort((a, b) => {
+        const fieldA = a[sortBy.field];
+        const fieldB = b[sortBy.field];
+        let comparison = 0;
+        if (fieldA > fieldB) {
+          comparison = 1;
+        } else if (fieldA < fieldB) {
+          comparison = -1;
+        }
+        return sortBy.direction === 'desc' ? comparison * -1 : comparison;
       });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to update workflow status: ${response.statusText}`);
-      }
-      
-      // Update workflow status in the list
-      setWorkflows(prevWorkflows => 
-        prevWorkflows.map(wf => 
-          wf.id === workflow.id 
-            ? { ...wf, status: workflow.status === 'active' ? 'draft' : 'active' }
-            : wf
-        )
-      );
-      
-      setSuccessMessage(`Workflow ${workflow.status === 'active' ? 'deactivated' : 'activated'} successfully`);
-    } catch (err) {
-      console.error('Error updating workflow status:', err);
-      setError(`Failed to update workflow status: ${err.message}`);
-    } finally {
-      setActionInProgress(null);
-    }
-  };
+  }, [workflows, searchTerm, statusFilter, sortBy]);
 
-  // Handle workflow cloning
-  const handleCloneWorkflow = async (workflow) => {
-    try {
-      setActionInProgress(workflow.id);
-      
-      const response = await fetch(`${ENDPOINTS.WORKFLOW_BY_ID(workflow.id)}/clone`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to clone workflow: ${response.statusText}`);
-      }
-      
-      const clonedWorkflow = await response.json();
-      
-      // Add the cloned workflow to the list
-      setWorkflows(prevWorkflows => [...prevWorkflows, clonedWorkflow]);
-      
-      setSuccessMessage(`Workflow cloned successfully`);
-    } catch (err) {
-      console.error('Error cloning workflow:', err);
-      setError(`Failed to clone workflow: ${err.message}`);
-    } finally {
-      setActionInProgress(null);
-    }
+  const handleSort = (field) => {
+    const direction = sortBy.field === field && sortBy.direction === 'asc' ? 'desc' : 'asc';
+    setSortBy({ field, direction });
   };
+  
+  // --- Render Functions ---
 
-  // Handle workflow deletion
-  const handleDeleteWorkflow = async (workflow) => {
-    // Confirm before deleting
-    if (!confirm(`Are you sure you want to delete the workflow "${workflow.name}"?`)) {
-      return;
-    }
-    
-    try {
-      setActionInProgress(workflow.id);
-      
-      const response = await fetch(ENDPOINTS.WORKFLOW_BY_ID(workflow.id), {
-        method: 'DELETE',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to delete workflow: ${response.statusText}`);
-      }
-      
-      // Remove the workflow from the list
-      setWorkflows(prevWorkflows => 
-        prevWorkflows.filter(wf => wf.id !== workflow.id)
-      );
-      
-      setSuccessMessage(`Workflow deleted successfully`);
-    } catch (err) {
-      console.error('Error deleting workflow:', err);
-      setError(`Failed to delete workflow: ${err.message}`);
-    } finally {
-      setActionInProgress(null);
-    }
-  };
+  const renderTableHeader = () => (
+    <thead className="bg-gray-50">
+      <tr>
+        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('name')}>
+          Workflow
+        </th>
+        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('status')}>
+          Status
+        </th>
+        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('confidence')}>
+          AI Confidence
+        </th>
+        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('lastRun')}>
+          Last Run
+        </th>
+        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer" onClick={() => handleSort('successRate')}>
+          Success Rate
+        </th>
+        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+          Actions
+        </th>
+      </tr>
+    </thead>
+  );
 
-  // Format date for display
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString();
-  };
+  const renderWorkflowRow = (workflow) => (
+    <tr key={workflow.id} className="bg-white hover:bg-gray-50">
+      <td className="px-6 py-4 whitespace-nowrap">
+        <div className="text-sm font-medium text-gray-900">{workflow.name}</div>
+        <div className="text-sm text-gray-500">{workflow.description}</div>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <StatusBadge status={workflow.status} />
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <div className="flex items-center">
+          <div className="w-24 mr-2">
+            <ConfidenceBar score={workflow.confidence} />
+          </div>
+          <div className="text-sm text-gray-900">{`${Math.round(workflow.confidence * 100)}%`}</div>
+        </div>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+        {workflow.lastRun ? (
+          <div>
+            <div>{workflow.lastRun.date}</div>
+            <StatusBadge status={workflow.lastRun.status} />
+          </div>
+        ) : 'Never run'}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+        {workflow.successRate !== null ? `${(workflow.successRate * 100).toFixed(1)}%` : 'N/A'}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+        <div className="flex items-center space-x-2">
+          <ActionButton onClick={() => onSelectWorkflow(workflow)} title="Edit Workflow">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fillRule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clipRule="evenodd" /></svg>
+          </ActionButton>
+          <ActionButton onClick={() => alert(`Running workflow ${workflow.id}`)} title="Run Workflow">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" /></svg>
+          </ActionButton>
+          <ActionButton onClick={() => alert(`Cloning workflow ${workflow.id}`)} title="Clone Workflow">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-600" viewBox="0 0 20 20" fill="currentColor"><path d="M7 9a2 2 0 012-2h6a2 2 0 012 2v6a2 2 0 01-2 2H9a2 2 0 01-2-2V9z" /><path d="M5 3a2 2 0 00-2 2v6a2 2 0 002 2V5h6a2 2 0 00-2-2H5z" /></svg>
+          </ActionButton>
+          <ActionButton onClick={() => alert(`Deleting workflow ${workflow.id}`)} title="Delete Workflow">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+          </ActionButton>
+        </div>
+      </td>
+    </tr>
+  );
 
-  // Get status badge class
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case 'active':
-        return 'status-active';
-      case 'draft':
-        return 'status-draft';
-      case 'archived':
-        return 'status-archived';
-      default:
-        return '';
-    }
-  };
+  if (isLoading) {
+    return <div className="p-8 text-center">Loading workflows...</div>;
+  }
+
+  if (error) {
+    return <div className="p-8 text-center text-red-500">{error}</div>;
+  }
 
   return (
-    <div className={`workflow-browser ${className}`}>
-      <div className="browser-header">
-        <h2>Workflows</h2>
-        <button 
-          className="create-button"
+    <div className="p-8 bg-gray-50 min-h-full">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold text-gray-900">Workflow Management</h1>
+        <button
           onClick={onCreateNew}
+          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
         >
           Create New Workflow
         </button>
       </div>
-      
-      {/* Error and success messages */}
-      {error && (
-        <div className="error-message">
-          {error}
-          <button className="dismiss-button" onClick={() => setError(null)}>✕</button>
+
+      {/* Toolbar */}
+      <div className="mb-4 flex space-x-4">
+        <input
+          type="text"
+          placeholder="Search workflows..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="flex-grow shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-gray-300 rounded-md"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block sm:text-sm border-gray-300 rounded-md"
+        >
+          <option value="all">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="draft">Draft</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+
+      {/* Workflow Table */}
+      <div className="flex flex-col">
+        <div className="-my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
+          <div className="py-2 align-middle inline-block min-w-full sm:px-6 lg:px-8">
+            <div className="shadow overflow-hidden border-b border-gray-200 sm:rounded-lg">
+              <table className="min-w-full divide-y divide-gray-200">
+                {renderTableHeader()}
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredAndSortedWorkflows.length > 0 ? (
+                    filteredAndSortedWorkflows.map(renderWorkflowRow)
+                  ) : (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
+                        No workflows found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      )}
-      
-      {successMessage && (
-        <div className="success-message">
-          {successMessage}
-          <button className="dismiss-button" onClick={() => setSuccessMessage(null)}>✕</button>
-        </div>
-      )}
-      
-      {/* Loading indicator */}
-      {isLoading && (
-        <div className="loading-indicator">
-          Loading workflows...
-        </div>
-      )}
-      
-      {/* Workflows list */}
-      {!isLoading && workflows.length === 0 ? (
-        <div className="empty-state">
-          <p>No workflows found. Create your first workflow to get started.</p>
-          <button className="create-button" onClick={onCreateNew}>
-            Create New Workflow
-          </button>
-        </div>
-      ) : (
-        <div className="workflows-list">
-          <table className="workflows-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Updated</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {workflows.map(workflow => (
-                <tr key={workflow.id} className="workflow-row">
-                  <td className="workflow-name">{workflow.name}</td>
-                  <td>
-                    <span className={`status-badge ${getStatusBadgeClass(workflow.status)}`}>
-                      {workflow.status}
-                    </span>
-                  </td>
-                  <td>{formatDate(workflow.created_at)}</td>
-                  <td>{formatDate(workflow.updated_at)}</td>
-                  <td className="actions-cell">
-                    <button
-                      className="action-button edit-button"
-                      onClick={() => onSelectWorkflow(workflow)}
-                      title="Edit workflow"
-                    >
-                      Edit
-                    </button>
-                    
-                    <button
-                      className={`action-button ${workflow.status === 'active' ? 'deactivate-button' : 'activate-button'}`}
-                      onClick={() => handleToggleActive(workflow)}
-                      disabled={actionInProgress === workflow.id}
-                      title={workflow.status === 'active' ? 'Deactivate workflow' : 'Activate workflow'}
-                    >
-                      {workflow.status === 'active' ? 'Deactivate' : 'Activate'}
-                    </button>
-                    
-                    <button
-                      className="action-button clone-button"
-                      onClick={() => handleCloneWorkflow(workflow)}
-                      disabled={actionInProgress === workflow.id}
-                      title="Clone workflow"
-                    >
-                      Clone
-                    </button>
-                    
-                    <button
-                      className="action-button delete-button"
-                      onClick={() => handleDeleteWorkflow(workflow)}
-                      disabled={actionInProgress === workflow.id}
-                      title="Delete workflow"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      
-      <style jsx>{`
-        .workflow-browser {
-          background: white;
-          border-radius: 6px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-          padding: 20px;
-        }
-        
-        .browser-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
-        }
-        
-        .browser-header h2 {
-          margin: 0;
-          font-size: 20px;
-          font-weight: 600;
-        }
-        
-        .create-button {
-          padding: 8px 16px;
-          background: #4285F4;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background-color 0.2s;
-        }
-        
-        .create-button:hover {
-          background: #3367d6;
-        }
-        
-        .error-message,
-        .success-message {
-          padding: 12px 16px;
-          border-radius: 4px;
-          margin-bottom: 16px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        
-        .error-message {
-          background: #ffebee;
-          color: #d32f2f;
-        }
-        
-        .success-message {
-          background: #e8f5e9;
-          color: #388e3c;
-        }
-        
-        .dismiss-button {
-          background: none;
-          border: none;
-          color: inherit;
-          cursor: pointer;
-          font-size: 16px;
-        }
-        
-        .loading-indicator {
-          text-align: center;
-          padding: 20px;
-          color: #666;
-        }
-        
-        .empty-state {
-          text-align: center;
-          padding: 40px 20px;
-          color: #666;
-        }
-        
-        .empty-state p {
-          margin-bottom: 20px;
-        }
-        
-        .workflows-table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        
-        .workflows-table th,
-        .workflows-table td {
-          padding: 12px 16px;
-          text-align: left;
-          border-bottom: 1px solid #eee;
-        }
-        
-        .workflows-table th {
-          font-weight: 600;
-          color: #333;
-          background: #f5f5f5;
-        }
-        
-        .workflow-row:hover {
-          background: #f9f9f9;
-        }
-        
-        .workflow-name {
-          font-weight: 500;
-        }
-        
-        .status-badge {
-          display: inline-block;
-          padding: 4px 8px;
-          border-radius: 12px;
-          font-size: 12px;
-          font-weight: 500;
-          text-transform: uppercase;
-        }
-        
-        .status-active {
-          background: #c8e6c9;
-          color: #388e3c;
-        }
-        
-        .status-draft {
-          background: #bbdefb;
-          color: #1976d2;
-        }
-        
-        .status-archived {
-          background: #e0e0e0;
-          color: #616161;
-        }
-        
-        .actions-cell {
-          display: flex;
-          gap: 8px;
-        }
-        
-        .action-button {
-          padding: 6px 12px;
-          border: none;
-          border-radius: 4px;
-          font-size: 13px;
-          cursor: pointer;
-          transition: background-color 0.2s;
-        }
-        
-        .edit-button {
-          background: #2196f3;
-          color: white;
-        }
-        
-        .edit-button:hover {
-          background: #1976d2;
-        }
-        
-        .activate-button {
-          background: #4caf50;
-          color: white;
-        }
-        
-        .activate-button:hover {
-          background: #388e3c;
-        }
-        
-        .deactivate-button {
-          background: #ff9800;
-          color: white;
-        }
-        
-        .deactivate-button:hover {
-          background: #f57c00;
-        }
-        
-        .clone-button {
-          background: #9c27b0;
-          color: white;
-        }
-        
-        .clone-button:hover {
-          background: #7b1fa2;
-        }
-        
-        .delete-button {
-          background: #f44336;
-          color: white;
-        }
-        
-        .delete-button:hover {
-          background: #d32f2f;
-        }
-        
-        .action-button:disabled {
-          background: #ccc;
-          cursor: not-allowed;
-        }
-      `}</style>
+      </div>
     </div>
   );
 };

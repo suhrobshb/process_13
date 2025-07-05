@@ -26,9 +26,11 @@ from .routers import (
 )
 from .routers.auth_router import router as auth_router
 from .scenario_library import router as library_router
+from .routers.llm_router import router as llm_router   # NEW
 
 from .trigger_engine import TriggerEngine
 from .database import create_db_and_tables
+from .routers.websocket_router import router as websocket_router
 
 # --------------------------------------------------------------------------- #
 # Structured / audit logging configuration
@@ -169,6 +171,10 @@ app.include_router(workflow_router.router, prefix="/api")
 app.include_router(execution_router.router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(library_router, prefix="/api")
+# LLM operations (prompt testing, etc.)
+app.include_router(llm_router, prefix="/api")
+# Real-time streaming (WebSocket) routes
+app.include_router(websocket_router)
 
 # --------------------------------------------------------------------------- #
 # Misc utility endpoints

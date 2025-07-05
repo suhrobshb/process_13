@@ -5,7 +5,7 @@ python-dotenv>=0.19.0
 pyyaml
 
 # AI / ML
-openai>=1.0.0,<2.0.0
+openai
 onnxruntime
 langchain
 
@@ -34,43 +34,46 @@ boto3
 twilio
 slack-sdk
 
-# Utilities
-python-multipart
-
-# -------------------------------------------------------------------
 # Authentication / Security
-# -------------------------------------------------------------------
-# JWT & cryptography helpers
 python-jose[cryptography]>=3.3.0
-# Password hashing (bcrypt)
 passlib[bcrypt]>=1.7.4
-# Email validation helper
 email-validator>=2.1.0
 
-# HTTP client used by HttpRunner
+# Utilities
+python-multipart
 requests>=2.31.0
 
 # Added from the code block
 sqlmodel
 
-# -------------------------------------------------------------------
+# Automation extras (low-level input capture for recording)
+evdev-binary
+
+# ------------------------------------------------------------------- 
+# Retrieval-Augmented Generation (RAG) Support
+# ------------------------------------------------------------------- 
+# Vector stores
+faiss-cpu>=1.7.4            # Local similarity-search index
+chromadb>=0.4.24            # Lightweight, serverless vector DB (optional)
+
+# Text splitting / token utilities
+tiktoken>=0.5.1
+
+# Document loaders & parsers
+unstructured>=0.10.18       # Robust loader for many doc types (PDF, HTML, etc.)
+pypdf>=3.16.4               # PDF parsing (used by PyPDFLoader)
+
+# Embeddings back-ends (OpenAI already listed above)
+sentence-transformers>=2.2.2   # Local embedding models (optional)
+
 # Production server
-# -------------------------------------------------------------------
-# WSGI/ASGI production server
 gunicorn>=20.1.0
 
-# -------------------------------------------------------------------
 # Testing dependencies
-# -------------------------------------------------------------------
-# Pytest framework for unit & integration tests
 pytest>=8.0.0
-# Plugin for simple fixture-based mocking
 pytest-mock>=3.12.0
-# Library to mock out HTTP requests in tests
 responses>=0.25.0
 
-# -------------------------------------------------------------------
-# NEW – Browser automation & related test utilities
-# -------------------------------------------------------------------
-playwright>=1.42.0       # Headless / headed browser automation
-pytest-playwright>=0.4.4 # Playwright helpers for test-suite
+# Browser automation & playwright helpers
+playwright>=1.42.0
+pytest-playwright>=0.4.4

@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Engine - Business Process Recorder</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #50e3c2;
+            --danger-color: #e74c3c;
+            --warning-color: #f5a623;
+            --bg-color: #f4f7f9;
+            --panel-bg-color: #ffffff;
+            --text-color: #34495e;
+            --text-light-color: #7f8c8d;
+            --border-color: #e1e4e8;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            z-index: 100;
+            flex-shrink: 0;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-controls button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-left: 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background-color 0.2s;
+        }
+        
+        .header-controls button:hover {
+            background-color: #3a7ac8;
+        }
+
+        .header-controls button.stop-btn {
+            background-color: var(--danger-color);
+        }
+        
+        .header-controls button.stop-btn:hover {
+            background-color: #c0392b;
+        }
+        
+        .header-controls button.run-btn {
+            background-color: var(--secondary-color);
+        }
+        .header-controls button.run-btn:hover {
+            background-color: #48c9a9;
+        }
+
+        .recording-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+        }
+
+        .recording-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #7f8c8d;
+            transition: background-color 0.3s;
+        }
+
+        .recording-dot.active {
+            background-color: var(--danger-color);
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        .app-integrations {
+            background-color: #e8eaed;
+            padding: 10px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+        
+        .app-integrations-title {
+            font-weight: 600;
+            color: #5f6368;
+        }
+
+        .app-icon {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background-color: var(--panel-bg-color);
+            padding: 5px 10px;
+            border-radius: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        
+        .app-icon img {
+            width: 20px;
+            height: 20px;
+        }
+
+        .main-container {
+            display: flex;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+
+        .workspace {
+            flex-grow: 1;
+            position: relative;
+            background-image: radial-gradient(#d7dade 1px, transparent 1px);
+            background-size: 20px 20px;
+            overflow: auto;
+            padding: 24px;
+        }
+
+        .canvas {
+            position: relative;
+            width: 100%;
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .action-box {
+            background-color: var(--panel-bg-color);
+            border: 1px solid var(--border-color);
+            border-left: 5px solid var(--primary-color);
+            border-radius: 6px;
+            padding: 15px;
+            width: 600px;
+            max-width: 90%;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        
+        .action-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        }
+        
+        .action-box.selected {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.3);
+        }
+        
+        .action-box.decision { border-left-color: var(--warning-color); }
+        .action-box.communication { border-left-color: var(--secondary-color); }
+        .action-box.system { border-left-color: #8e44ad; }
+        
+        .action-box.running {
+            border-left-color: var(--primary-color);
+            animation: running-glow 1.5s infinite alternate;
+        }
+        @keyframes running-glow {
+            from { box-shadow: 0 0 5px rgba(74, 144, 226, 0.2); }
+            to { box-shadow: 0 0 20px rgba(74, 144, 226, 0.6); }
+        }
+        
+        .action-box.completed {
+            border-left-color: var(--secondary-color);
+            opacity: 0.8;
+        }
+        
+        .action-box.failed {
+            border-left-color: var(--danger-color);
+            background-color: #fff5f5;
+        }
+
+        .action-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .action-icon {
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background-color: #f0f4f8;
+        }
+        
+        .action-box.decision .action-icon { background-color: #fff8e1; }
+        .action-box.communication .action-icon { background-color: #e6f9f1; }
+        .action-box.system .action-icon { background-color: #f3e5f5; }
+
+        .action-title {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin: 0;
+        }
+
+        .action-description {
+            font-size: 0.95rem;
+            color: var(--text-light-color);
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+        
+        .scenarios-container {
+            margin-top: 15px;
+            border-top: 1px dashed var(--border-color);
+            padding-top: 15px;
+        }
+        
+        .scenario {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-left: 3px solid var(--primary-color);
+        }
+        
+        .scenario-title {
+            font-weight: bold;
+            font-size: 0.9rem;
+            color: var(--primary-color);
+            margin-bottom: 5px;
+        }
+        
+        .scenario.accepted .scenario-title { color: var(--secondary-color); }
+        .scenario.rejected .scenario-title { color: var(--danger-color); }
+        .scenario.accepted { border-left-color: var(--secondary-color); }
+        .scenario.rejected { border-left-color: var(--danger-color); }
+
+        .properties-panel {
+            width: 350px;
+            background-color: var(--panel-bg-color);
+            border-left: 1px solid var(--border-color);
+            padding: 20px;
+            overflow-y: auto;
+            transition: width 0.3s ease, padding 0.3s ease;
+        }
+        
+        .properties-panel.hidden {
+            width: 0;
+            padding: 20px 0;
+            overflow: hidden;
+        }
+
+        .properties-panel h2 {
+            margin-top: 0;
+            font-size: 1.2rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-light-color);
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+        
+        .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 1rem;
+            font-family: var(--font-family);
+        }
+        
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        .connection-arrow {
+            color: var(--text-light-color);
+            font-size: 2rem;
+            text-align: center;
+            margin: -10px 0;
+        }
+        
+        .status-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        
+        .action-box.completed .status-overlay {
+            opacity: 1;
+            color: var(--secondary-color);
+        }
+        
+        .action-box.failed .status-overlay {
+            opacity: 1;
+            color: var(--danger-color);
+        }
+
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <h1>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+            <span>AI Process Recorder</span>
+        </h1>
+        <div class="header-controls">
+            <div class="recording-status">
+                <div id="recording-dot" class="recording-dot"></div>
+                <span id="recording-status-text">Not Recording</span>
+            </div>
+            <button id="start-record-btn" class="start-btn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3" fill="currentColor"></circle></svg>
+                <span>Start Recording</span>
+            </button>
+            <button id="stop-record-btn" class="stop-btn" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12"></rect></svg>
+                <span>Stop Recording</span>
+            </button>
+            <button id="run-workflow-btn" class="run-btn" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Run Workflow</span>
+            </button>
+        </div>
+    </header>
+    
+    <div class="app-integrations">
+        <span class="app-integrations-title">Detected Apps:</span>
+        <div class="app-icon">
+            <img src="https://img.icons8.com/color/48/microsoft-outlook-2019.png" alt="Outlook">
+            <span>Outlook</span>
+        </div>
+        <div class="app-icon">
+            <img src="https://img.icons8.com/color/48/000000/sap.png" alt="TMS">
+            <span>TMS Pro</span>
+        </div>
+        <div class="app-icon">
+            <img src="https://img.icons8.com/fluency/48/000000/database.png" alt="Load Board">
+            <span>Load Board</span>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <main class="workspace">
+            <div id="canvas" class="canvas">
+                <!-- Action boxes will be dynamically added here -->
+            </div>
+        </main>
+
+        <aside id="properties-panel" class="properties-panel hidden">
+            <h2>Edit Action</h2>
+            <div id="properties-content">
+                <p>Select an action to edit its properties.</p>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const startBtn = document.getElementById('start-record-btn');
+            const stopBtn = document.getElementById('stop-record-btn');
+            const runBtn = document.getElementById('run-workflow-btn');
+            const recordingDot = document.getElementById('recording-dot');
+            const recordingStatusText = document.getElementById('recording-status-text');
+            const canvas = document.getElementById('canvas');
+            const propertiesPanel = document.getElementById('properties-panel');
+            const propertiesContent = document.getElementById('properties-content');
+
+            let isRecording = false;
+            let recordingInterval;
+            let actionCounter = 0;
+            let selectedActionId = null;
+
+            const logisticsWorkflow = [
+                {
+                    id: 'action1',
+                    type: 'system',
+                    icon: 'https://img.icons8.com/fluency/48/000000/new-message.png',
+                    title: 'Receive New Load Request',
+                    description: 'AI detected a new load request email from a priority broker in Outlook and extracted key details: origin, destination, and equipment type.',
+                    scenarios: []
+                },
+                {
+                    id: 'action2',
+                    type: 'system',
+                    icon: 'https://img.icons8.com/fluency/48/000000/search-in-list.png',
+                    title: 'Analyze Load & Check Availability',
+                    description: 'AI is cross-referencing the load requirements with available drivers and equipment in the TMS Pro system. Checking HOS and location.',
+                    scenarios: []
+                },
+                {
+                    id: 'action3',
+                    type: 'communication',
+                    icon: 'https://img.icons8.com/fluency/48/000000/chat.png',
+                    title: 'Negotiate Rate with Broker',
+                    description: 'User is communicating with the broker to negotiate the rate. AI is providing real-time market rate suggestions based on historical data.',
+                    scenarios: []
+                },
+                {
+                    id: 'action4',
+                    type: 'decision',
+                    icon: 'https://img.icons8.com/fluency/48/000000/decision.png',
+                    title: 'Decision: Rate Agreement',
+                    description: 'The workflow will branch based on whether the negotiated rate is accepted or rejected.',
+                    scenarios: [
+                        { id: 'accepted', title: 'Rate Accepted', description: 'Proceed with booking the load and assigning a driver.' },
+                        { id: 'rejected', title: 'Rate Rejected', description: 'Send a final counter-offer or decline the load.' }
+                    ]
+                },
+                {
+                    id: 'action5',
+                    type: 'system',
+                    icon: 'https://img.icons8.com/fluency/48/000000/task-planning.png',
+                    title: 'Book Load & Assign Driver',
+                    description: 'AI is automatically booking the load in the TMS, assigning the best available driver, and preparing the dispatch documents.',
+                    scenarios: [],
+                    dependsOn: { id: 'action4', scenario: 'accepted' }
+                },
+                {
+                    id: 'action6',
+                    type: 'communication',
+                    icon: 'https://img.icons8.com/fluency/48/000000/filled-sent.png',
+                    title: 'Communicate Dispatch to Driver',
+                    description: 'AI is sending an automated dispatch notification to the driver via SMS and email, including all load details and instructions.',
+                    scenarios: [],
+                    dependsOn: { id: 'action5' }
+                }
+            ];
+
+            function startRecording() {
+                isRecording = true;
+                actionCounter = 0;
+                canvas.innerHTML = '';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                runBtn.disabled = true;
+                recordingDot.classList.add('active');
+                recordingStatusText.textContent = 'Recording...';
+                
+                recordingInterval = setInterval(addNextAction, 2500);
+            }
+
+            function stopRecording() {
+                isRecording = false;
+                clearInterval(recordingInterval);
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                runBtn.disabled = false;
+                recordingDot.classList.remove('active');
+                recordingStatusText.textContent = 'Not Recording';
+            }
+            
+            function runWorkflow() {
+                runBtn.disabled = true;
+                let delay = 0;
+                const boxes = document.querySelectorAll('.action-box');
+                boxes.forEach((box, index) => {
+                    setTimeout(() => {
+                        // Remove previous states
+                        boxes.forEach(b => b.classList.remove('running'));
+                        
+                        box.classList.add('running');
+                        
+                        // Simulate completion after a delay
+                        setTimeout(() => {
+                            box.classList.remove('running');
+                            box.classList.add('completed');
+                            const overlay = box.querySelector('.status-overlay');
+                            overlay.innerHTML = '✅ Completed';
+                            
+                            // If it's the last box, re-enable the run button
+                            if(index === boxes.length - 1) {
+                                runBtn.disabled = false;
+                            }
+                        }, 1500);
+                        
+                    }, delay);
+                    delay += 2000; // 2 seconds between steps
+                });
+            }
+
+            function addNextAction() {
+                if (actionCounter >= logisticsWorkflow.length) {
+                    stopRecording();
+                    return;
+                }
+                
+                const actionData = logisticsWorkflow[actionCounter];
+                createActionBox(actionData);
+                
+                if (actionCounter > 0) {
+                    createConnectionLine();
+                }
+
+                actionCounter++;
+            }
+            
+            function createActionBox(data) {
+                const box = document.createElement('div');
+                box.className = `action-box ${data.type}`;
+                box.id = data.id;
+                box.innerHTML = `
+                    <div class="status-overlay"></div>
+                    <div class="action-header">
+                        <div class="action-icon">
+                            <img src="${data.icon}" alt="${data.type} icon" width="24" height="24">
+                        </div>
+                        <h3 class="action-title">${data.title}</h3>
+                    </div>
+                    <p class="action-description">${data.description}</p>
+                    ${data.scenarios.length > 0 ? createScenariosHTML(data.scenarios) : ''}
+                `;
+                
+                box.addEventListener('click', () => selectAction(data.id));
+                canvas.appendChild(box);
+            }
+            
+            function createConnectionLine() {
+                const arrow = document.createElement('div');
+                arrow.className = 'connection-arrow';
+                arrow.innerHTML = '↓';
+                canvas.insertBefore(arrow, canvas.lastChild);
+            }
+
+            function createScenariosHTML(scenarios) {
+                let html = '<div class="scenarios-container">';
+                scenarios.forEach(scenario => {
+                    html += `
+                        <div class="scenario ${scenario.id}">
+                            <div class="scenario-title">${scenario.title}</div>
+                            <p>${scenario.description}</p>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                return html;
+            }
+
+            function selectAction(actionId) {
+                if (selectedActionId) {
+                    document.getElementById(selectedActionId)?.classList.remove('selected');
+                }
+                selectedActionId = actionId;
+                const selectedBox = document.getElementById(actionId);
+                if (selectedBox) {
+                    selectedBox.classList.add('selected');
+                    propertiesPanel.classList.remove('hidden');
+                    renderProperties(actionId);
+                }
+            }
+            
+            function closeProperties() {
+                if (selectedActionId) {
+                    document.getElementById(selectedActionId)?.classList.remove('selected');
+                }
+                selectedActionId = null;
+                propertiesPanel.classList.add('hidden');
+            }
+
+            function renderProperties(actionId) {
+                const actionData = logisticsWorkflow.find(a => a.id === actionId);
+                if (!actionData) return;
+
+                let scenariosHTML = '';
+                if (actionData.scenarios.length > 0) {
+                    scenariosHTML += '<div class="form-group"><h3>Scenarios</h3>';
+                    actionData.scenarios.forEach((scenario, index) => {
+                        scenariosHTML += `
+                            <div class="scenario-editor" style="margin-top: 10px;">
+                                <label for="scenario-title-${index}">Scenario ${index + 1} Title</label>
+                                <input type="text" id="scenario-title-${index}" value="${scenario.title}" class="form-group">
+                                <label for="scenario-desc-${index}">Description</label>
+                                <textarea id="scenario-desc-${index}" class="form-group">${scenario.description}</textarea>
+                            </div>
+                        `;
+                    });
+                    scenariosHTML += '</div>';
+                }
+
+                propertiesContent.innerHTML = `
+                    <button class="close-btn" id="close-props-btn">&times;</button>
+                    <h2>Edit Action</h2>
+                    <div class="form-group">
+                        <label for="prop-title">Action Title</label>
+                        <input type="text" id="prop-title" value="${actionData.title}">
+                    </div>
+                    <div class="form-group">
+                        <label for="prop-description">AI-Generated Description</label>
+                        <textarea id="prop-description" rows="5">${actionData.description}</textarea>
+                    </div>
+                    ${scenariosHTML}
+                `;
+                
+                document.getElementById('close-props-btn').addEventListener('click', closeProperties);
+                
+                document.getElementById('prop-title').addEventListener('input', (e) => {
+                    updateAction(actionId, { title: e.target.value });
+                });
+                document.getElementById('prop-description').addEventListener('input', (e) => {
+                    updateAction(actionId, { description: e.target.value });
+                });
+                
+                actionData.scenarios.forEach((scenario, index) => {
+                    document.getElementById(`scenario-title-${index}`).addEventListener('input', (e) => {
+                        updateScenario(actionId, index, { title: e.target.value });
+                    });
+                    document.getElementById(`scenario-desc-${index}`).addEventListener('input', (e) => {
+                        updateScenario(actionId, index, { description: e.target.value });
+                    });
+                });
+            }
+            
+            function updateAction(actionId, updates) {
+                const actionData = logisticsWorkflow.find(a => a.id === actionId);
+                const actionBox = document.getElementById(actionId);
+                if (!actionData || !actionBox) return;
+                
+                Object.assign(actionData, updates);
+                
+                if (updates.title) {
+                    actionBox.querySelector('.action-title').textContent = updates.title;
+                }
+                if (updates.description) {
+                    actionBox.querySelector('.action-description').textContent = updates.description;
+                }
+            }
+            
+            function updateScenario(actionId, scenarioIndex, updates) {
+                const actionData = logisticsWorkflow.find(a => a.id === actionId);
+                const actionBox = document.getElementById(actionId);
+                if (!actionData || !actionBox) return;
+                
+                Object.assign(actionData.scenarios[scenarioIndex], updates);
+                
+                const scenariosContainer = actionBox.querySelector('.scenarios-container');
+                if (scenariosContainer) {
+                    scenariosContainer.innerHTML = createScenariosHTML(actionData.scenarios);
+                }
+            }
+
+            startBtn.addEventListener('click', startRecording);
+            stopBtn.addEventListener('click', stopRecording);
+            runBtn.addEventListener('click', runWorkflow);
+        });
+    </script>
+</body>
+</html>

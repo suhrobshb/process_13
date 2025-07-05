@@ -1,0 +1,45 @@
+# The command to run when the "Run" button is pressed.
+run = "python replit_main.py"
+
+# The main entrypoint file for the Repl.
+entrypoint = "replit_main.py"
+
+# Commands to run on boot to ensure all dependencies are installed.
+# This installs Python packages and the necessary browser binaries for Playwright.
+onBoot = "pip install -r requirements.txt && python -m playwright install chromium"
+
+# Nix environment configuration.
+[nix]
+# Use a recent and stable Nix channel for the environment.
+channel = "stable-22_11"
+
+# System-level dependencies needed for Python packages like pyautogui and playwright.
+# These libraries are essential for desktop and browser automation features.
+deps = [
+  "pkgs.libx11",
+  "pkgs.libxext",
+  "pkgs.libxtst",
+  "pkgs.libpng",
+  "pkgs.libjpeg",
+  "pkgs.zlib",
+  "pkgs.nss",
+  "pkgs.fontconfig",
+  "pkgs.chromium"
+]
+
+# Packager configuration for Python, enabling Replit's package management UI.
+[packager]
+language = "python3"
+[packager.features]
+packageSearch = true
+guessImports = true
+
+# Python language configuration.
+[languages.python3]
+pattern = "**/*.py"
+
+# Deployment configuration for Replit's built-in deployment features.
+# This specifies how to run the application when deployed via Replit.
+[deployment]
+run = ["python", "replit_main.py"]
+deploymentTarget = "cloudrun"

@@ -9,8 +9,9 @@ and follows a common interface for execution and error handling.
 Runners:
 - ShellRunner: Executes shell commands and scripts
 - HttpRunner: Makes HTTP requests to external APIs
-- LLMRunner: Interacts with language models (OpenAI, etc.)
+- LLMRunner: Interacts with language models (OpenAI, etc.), now with RAG support.
 - ApprovalRunner: Handles human-in-the-loop approval steps
+- RAGDecisionRunner: NEW - Makes intelligent decisions using context from user data.
 """
 
 import os
@@ -265,22 +266,24 @@ class HttpRunner(Runner):
 
 
 class LLMRunner(Runner):
-    """Interacts with language models (OpenAI, etc.)."""
+    """
+    Interacts with language models (OpenAI, etc.).
+    Enhanced with RAG capabilities for context-aware responses.
+    """
     
     def execute(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Execute an LLM request.
+        Execute an LLM request, optionally augmenting with RAG context.
         
         Params expected in self.params:
-            - provider: LLM provider (openai, anthropic, etc.)
-            - model: Model name (gpt-4, claude-2, etc.)
+            - provider: LLM provider (e.g., "openai")
+            - model: Model name (e.g., "gpt-4")
             - prompt: Text prompt or messages array
-            - temperature: Sampling temperature
-            - max_tokens: Maximum tokens to generate
-            - api_key: Optional API key (falls back to environment)
-            
+            - temperature, max_tokens, etc.
+            - rag_params: (Optional) Dict with "query" and "data_source_ids"
+        
         Returns:
-            Execution result with generated text and usage stats
+            Execution result with generated text and usage stats.
         """
         context = context or {}
         self._start_execution()
@@ -290,6 +293,7 @@ class LLMRunner(Runner):
             provider = self.params.get("provider", "openai").lower()
             model = self.params.get("model")
             prompt = self.params.get("prompt")
+            rag_params = self.params.get("rag_params")
             
             if not model:
                 return self._end_execution(False, error="No model specified")
@@ -302,55 +306,68 @@ class LLMRunner(Runner):
                     if isinstance(value, (str, int, float, bool)):
                         prompt = prompt.replace(f"${{{key}}}", str(value))
             
+            # --- RAG Integration ---
+            source_documents = []
+            if rag_params and isinstance(rag_params, dict):
+                rag_query = rag_params.get("query")
+                data_source_ids = rag_params.get("data_source_ids")
+                
+                if rag_query and data_source_ids:
+                    logger.info(f"Performing RAG query for step {self.step_id}")
+                    try:
+                        from ai_engine.rag_engine import RAGEngine
+                        
+                        user_id = context.get("user_id")
+                        tenant_id = context.get("tenant_id")
+                        if not user_id or not tenant_id:
+                            raise ValueError("RAG requires user_id and tenant_id in context")
+                            
+                        rag_engine = RAGEngine(user_id, tenant_id)
+                        rag_result = rag_engine.query(rag_query, data_source_ids)
+                        
+                        # Augment the prompt with retrieved context
+                        retrieved_context = "\n".join([doc.page_content for doc in rag_result.get("source_documents", [])])
+                        augmented_prompt = f"Context:\n{retrieved_context}\n\nQuestion: {prompt}"
+                        prompt = augmented_prompt
+                        source_documents = rag_result.get("source_documents", [])
+                        
+                    except Exception as e:
+                        logger.warning(f"RAG query failed for step {self.step_id}: {e}")
+                        # Proceed without RAG context
+            
             # Handle different providers
             if provider == "openai":
-                return self._execute_openai(prompt, model)
+                openai_result = self._execute_openai(prompt, model)
+                if openai_result["success"]:
+                    openai_result["result"]["source_documents"] = [doc.metadata for doc in source_documents]
+                return openai_result
             else:
                 return self._end_execution(False, error=f"Unsupported LLM provider: {provider}")
                 
         except Exception as e:
             return self._end_execution(False, error=str(e))
     
-    # ------------------------------------------------------------------ #
-    # New OpenAI client (>=1.0) implementation
-    # ------------------------------------------------------------------ #
     def _execute_openai(self, prompt: Union[str, list], model: str):
-        """
-        Execute request using OpenAI Python-SDK ≥ 1.0.
-        """
+        """Execute request using OpenAI Python-SDK ≥ 1.0."""
         try:
-            # Import lazily so we don't add a hard dependency at import-time
             from openai import OpenAI
 
-            api_key = (
-                self.params.get("api_key")
-                or os.environ.get("OPENAI_API_KEY")
-            )
+            api_key = self.params.get("api_key") or os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                return self._end_execution(
-                    False, error="OpenAI API key not provided"
-                )
+                return self._end_execution(False, error="OpenAI API key not provided")
 
             client = OpenAI(api_key=api_key)
-
             temperature = self.params.get("temperature", 0.7)
             max_tokens = self.params.get("max_tokens", 1000)
 
-            # Chat models (prompt as list of dicts)  vs  legacy completion
             if isinstance(prompt, list):
                 response = client.chat.completions.create(
-                    model=model,
-                    messages=prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
+                    model=model, messages=prompt, temperature=temperature, max_tokens=max_tokens
                 )
                 content = response.choices[0].message.content
             else:
                 response = client.completions.create(
-                    model=model,
-                    prompt=prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
+                    model=model, prompt=prompt, temperature=temperature, max_tokens=max_tokens
                 )
                 content = response.choices[0].text
 
@@ -362,11 +379,8 @@ class LLMRunner(Runner):
                     "model": model,
                 },
             )
-
-        except Exception as e:  # pylint: disable=broad-except
-            return self._end_execution(
-                False, error=f"OpenAI client error: {str(e)}"
-            )
+        except Exception as e:
+            return self._end_execution(False, error=f"OpenAI client error: {str(e)}")
 
 
 class ApprovalRunner(Runner):
@@ -424,8 +438,6 @@ class ApprovalRunner(Runner):
                 })
             
             # Wait for approval (simplified implementation)
-            # In a real system, this would query a database or message queue
-            # Here we just simulate waiting and always approve after a delay
             logger.info(f"Waiting for approval {approval_id}...")
             time.sleep(5)  # Simulate waiting
             
@@ -446,12 +458,6 @@ class ApprovalRunner(Runner):
     def _send_approval_notifications(self, approval_id, title, description, approvers, method):
         """Send notifications to approvers (simplified implementation)."""
         logger.info(f"Would send {method} notifications to {approvers} for approval {approval_id}")
-        # In a real implementation, this would send emails or Slack messages
-        # For example:
-        # if method == "email":
-        #     send_email(approvers, f"Approval Request: {title}", description)
-        # elif method == "slack":
-        #     send_slack_message(approvers, title, description)
 
 
 class DecisionRunner(Runner):
@@ -478,7 +484,6 @@ class DecisionRunner(Runner):
             if not conditions and not default_target:
                 return self._end_execution(False, error="No conditions or default target specified")
             
-            # Evaluate each condition
             for condition in conditions:
                 expression = condition.get("expression")
                 target = condition.get("target")
@@ -486,39 +491,20 @@ class DecisionRunner(Runner):
                 if not expression or not target:
                     continue
                 
-                # Simple expression evaluation (in a real system, use a proper expression parser)
-                # This is a simplified implementation that handles basic comparisons
                 try:
-                    # Tiny expression-evaluator using AST to avoid `eval`
                     def _safe_eval(expr: str) -> bool:
                         tree = ast.parse(expr, mode="eval")
                         allowed_nodes = (
-                            ast.Expression,
-                            ast.BoolOp,
-                            ast.BinOp,
-                            ast.UnaryOp,
-                            ast.Compare,
-                            ast.Name,
-                            ast.Load,
-                            ast.Constant,
-                            ast.And,
-                            ast.Or,
-                            ast.Eq,
-                            ast.NotEq,
-                            ast.Gt,
-                            ast.GtE,
-                            ast.Lt,
-                            ast.LtE,
+                            ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp,
+                            ast.Compare, ast.Name, ast.Load, ast.Constant,
+                            ast.And, ast.Or, ast.Eq, ast.NotEq, ast.Gt, ast.GtE, ast.Lt, ast.LtE
                         )
                         for node in ast.walk(tree):
                             if not isinstance(node, allowed_nodes):
-                                raise ValueError(
-                                    f"Unsupported expression element: {type(node).__name__}"
-                                )
+                                raise ValueError(f"Unsupported expression element: {type(node).__name__}")
                         compiled = compile(tree, "<expr>", "eval")
-                        return bool(eval(compiled, {}, {}))  # noqa: S307
+                        return bool(eval(compiled, {}, {}))
 
-                    # Replace template vars
                     eval_expr = expression
                     for k, v in context.items():
                         if isinstance(v, (str, int, float, bool)):
@@ -526,23 +512,94 @@ class DecisionRunner(Runner):
 
                     if _safe_eval(eval_expr):
                         logger.info(f"Condition '{expression}' evaluated to True, taking path to '{target}'")
-                        return self._end_execution(True, result={
-                            "target": target,
-                            "matched_condition": expression
-                        })
+                        return self._end_execution(True, result={"target": target, "matched_condition": expression})
                 except Exception as e:
                     logger.warning(f"Error evaluating condition '{expression}': {str(e)}")
             
-            # If no conditions matched, use default target
             if default_target:
                 logger.info(f"No conditions matched, taking default path to '{default_target}'")
-                return self._end_execution(True, result={
-                    "target": default_target,
-                    "matched_condition": None
-                })
+                return self._end_execution(True, result={"target": default_target, "matched_condition": None})
             
-            # No matching condition and no default
             return self._end_execution(False, error="No conditions matched and no default target specified")
+            
+        except Exception as e:
+            return self._end_execution(False, error=str(e))
+
+
+class RAGDecisionRunner(Runner):
+    """
+    Makes intelligent decisions based on context from the RAG engine.
+    """
+    def execute(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Uses RAG to retrieve context and an LLM to choose an outcome.
+        
+        Params expected in self.params:
+            - query: The question to ask the RAG system.
+            - data_source_ids: List of data source IDs to query.
+            - outcomes: List of possible string outcomes (e.g., ["approve", "reject"]).
+            - llm_params: Standard LLM parameters (model, provider, etc.).
+        """
+        context = context or {}
+        self._start_execution()
+        
+        try:
+            query = self.params.get("query")
+            data_source_ids = self.params.get("data_source_ids")
+            outcomes = self.params.get("outcomes")
+            llm_params = self.params.get("llm_params", {})
+            
+            if not all([query, data_source_ids, outcomes]):
+                return self._end_execution(False, error="Missing required parameters: query, data_source_ids, outcomes")
+            
+            # 1. Retrieve context using RAG
+            from ai_engine.rag_engine import RAGEngine
+            user_id = context.get("user_id")
+            tenant_id = context.get("tenant_id")
+            if not user_id or not tenant_id:
+                raise ValueError("RAG requires user_id and tenant_id in context")
+            
+            rag_engine = RAGEngine(user_id, tenant_id)
+            rag_result = rag_engine.query(query, data_source_ids)
+            retrieved_context = "\n".join([doc.page_content for doc in rag_result.get("source_documents", [])])
+            
+            # 2. Construct decision-making prompt
+            decision_prompt = f"""
+            Based on the following context:
+            ---
+            {retrieved_context}
+            ---
+            And the user's question: "{query}"
+
+            Which of the following outcomes is most appropriate?
+            Possible outcomes: {outcomes}
+
+            Respond with ONLY the chosen outcome from the list.
+            """
+            
+            # 3. Call LLM to make a decision
+            llm_runner = LLMRunner(self.step_id, {
+                "provider": llm_params.get("provider", "openai"),
+                "model": llm_params.get("model", "gpt-4"),
+                "prompt": decision_prompt,
+                "temperature": 0.1,
+                "max_tokens": 50
+            })
+            llm_result = llm_runner.execute(context)
+            
+            if not llm_result["success"]:
+                return self._end_execution(False, error=f"LLM decision failed: {llm_result.get('error')}")
+            
+            # 4. Parse and validate the outcome
+            chosen_outcome = llm_result["result"]["content"].strip().lower()
+            if chosen_outcome not in [o.lower() for o in outcomes]:
+                logger.warning(f"LLM returned an invalid outcome '{chosen_outcome}'. Falling back to default.")
+                chosen_outcome = outcomes[0] # Fallback to the first outcome
+            
+            return self._end_execution(True, result={
+                "chosen_outcome": chosen_outcome,
+                "source_documents": rag_result.get("source_documents", [])
+            })
             
         except Exception as e:
             return self._end_execution(False, error=str(e))
@@ -555,17 +612,6 @@ class RunnerFactory:
     def create_runner(step_type: str, step_id: str, params: Dict[str, Any]) -> Runner:
         """
         Create and return the appropriate runner for the given step type.
-        
-        Args:
-            step_type: Type of step to execute
-            step_id: Unique identifier for the step
-            params: Parameters for the step
-            
-        Returns:
-            Appropriate Runner instance
-            
-        Raises:
-            ValueError: If step_type is unknown
         """
         runners = {
             "shell": ShellRunner,
@@ -573,35 +619,26 @@ class RunnerFactory:
             "llm": LLMRunner,
             "approval": ApprovalRunner,
             "decision": DecisionRunner,
-            # --- Enhanced automation runners ------------------------------ #
-            # The following imports are optional / heavy-weight.  We import
-            # lazily so that projects that don’t need desktop / browser
-            # automation aren’t forced to install extra dependencies.
+            "rag_decision": RAGDecisionRunner,
             "desktop": None,
             "browser": None,
         }
         
-        # Lazily import the enhanced runners only when requested
         step_key = step_type.lower()
         if step_key in ("desktop", "browser") and runners[step_key] is None:
             try:
                 if step_key == "desktop":
-                    from ai_engine.enhanced_runners.desktop_runner import (  # type: ignore
-                        DesktopRunner,
-                    )
+                    from ai_engine.enhanced_runners.desktop_runner import DesktopRunner
                     runners["desktop"] = DesktopRunner
-                else:  # browser
-                    from ai_engine.enhanced_runners.browser_runner import (  # type: ignore
-                        BrowserRunner,
-                    )
+                else:
+                    from ai_engine.enhanced_runners.browser_runner import BrowserRunner
                     runners["browser"] = BrowserRunner
-            except ModuleNotFoundError as exc:  # pragma: no cover
+            except ModuleNotFoundError as exc:
                 raise ValueError(
-                    f"Runner type '{step_type}' requires optional dependencies "
-                    "that are not installed.  Install extras in requirements.txt."
+                    f"Runner type '{step_type}' requires optional dependencies that are not installed."
                 ) from exc
 
-        runner_class = runners.get(step_type.lower())
+        runner_class = runners.get(step_key)
         if not runner_class:
             raise ValueError(f"Unknown step type: {step_type}")
         
@@ -616,15 +653,6 @@ def execute_step(
 ) -> Dict[str, Any]:
     """
     Helper function to execute a single workflow step.
-    
-    Args:
-        step_id: Unique identifier for the step
-        step_type: Type of step to execute
-        params: Parameters for the step
-        context: Execution context with variables from previous steps
-        
-    Returns:
-        Execution result
     """
     try:
         runner = RunnerFactory.create_runner(step_type, step_id, params)

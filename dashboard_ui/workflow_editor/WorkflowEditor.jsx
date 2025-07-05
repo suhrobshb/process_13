@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactFlow, {
   ReactFlowProvider,
   addEdge,
@@ -6,437 +6,248 @@ import ReactFlow, {
   useEdgesState,
   Controls,
   Background,
-  Panel
+  MiniMap,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import './workflow-editor.css';
 
-// Import our custom node components
-import { StepBox } from './StepBox';
-import { ApprovalBox } from './ApprovalBox';
-import { DecisionBox } from './DecisionBox';
-import { TriggerBox } from './TriggerBox';
-import { ScenarioBox } from './ScenarioBox';
-import { FlowConnector } from './FlowConnector';
+// --- Custom Node Component for Action Step Boxes ---
 
-// Import new components
-import PredefinedActionsPanel from './PredefinedActionsPanel';
-import NodePropertiesPanel from './NodePropertiesPanel';
-import ExecutionMonitor from './ExecutionMonitor';
+const ActionStepNode = ({ data }) => {
+  const confidence = data.confidence_score || 0;
+  let confidenceColor = 'bg-green-500';
+  if (confidence < 0.9) confidenceColor = 'bg-yellow-500';
+  if (confidence < 0.7) confidenceColor = 'bg-red-500';
 
-// Import API endpoints and config
-import { ENDPOINTS } from '../config';
+  let statusOverlay = null;
+  if (data.status) {
+    let statusColor = '';
+    let statusText = '';
+    switch (data.status) {
+      case 'running':
+        statusColor = 'bg-blue-500/80';
+        statusText = 'Running...';
+        break;
+      case 'completed':
+        statusColor = 'bg-green-500/80';
+        statusText = '✅ Completed';
+        break;
+      case 'failed':
+        statusColor = 'bg-red-500/80';
+        statusText = '❌ Failed';
+        break;
+    }
+    statusOverlay = (
+      <div className={`absolute inset-0 ${statusColor} flex items-center justify-center text-white font-bold text-lg rounded-md`}>
+        {statusText}
+      </div>
+    );
+  }
 
-// Define custom node types
-const nodeTypes = {
-  step: StepBox,
-  approval: ApprovalBox,
-  decision: DecisionBox,
-  trigger: TriggerBox,
-  scenario: ScenarioBox,
-  http: StepBox,
-  shell: StepBox,
-  llm: StepBox,
+  return (
+    <div className="p-4 border rounded-lg bg-white shadow-md w-80 relative">
+      <div className="font-bold text-lg mb-2">{data.label}</div>
+      <p className="text-sm text-gray-600 mb-4">{data.description}</p>
+      <div className="text-xs text-gray-400">AI Confidence</div>
+      <div className="w-full bg-gray-200 rounded-full h-2.5">
+        <div
+          className={`${confidenceColor} h-2.5 rounded-full`}
+          style={{ width: `${confidence * 100}%` }}
+        ></div>
+      </div>
+      <div className="text-right text-xs font-bold mt-1">{`${Math.round(confidence * 100)}%`}</div>
+      {statusOverlay}
+    </div>
+  );
 };
 
-// Define custom edge types
-const edgeTypes = {
-  flowConnector: FlowConnector,
-};
+const nodeTypes = { actionStep: ActionStepNode };
 
-const WorkflowEditor = ({ taskId, initialData = null }) => {
-  const reactFlowWrapper = useRef(null);
+// --- Main Workflow Editor Component ---
+
+const WorkflowEditor = ({ structuredWorkflow, onSave, onRun }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [workflowName, setWorkflowName] = useState('New Workflow');
-  const [workflowId, setWorkflowId] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [executionLogs, setExecutionLogs] = useState([]);
   const [isExecuting, setIsExecuting] = useState(false);
-  const [saveError, setSaveError] = useState(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  
-  // Execution monitoring state
-  const [showExecutionMonitor, setShowExecutionMonitor] = useState(false);
-  const [executionId, setExecutionId] = useState(null);
-  const [executionError, setExecutionError] = useState(null);
 
-  // Load initial workflow data if available
+  // Load workflow data when the component receives it
   useEffect(() => {
-    if (initialData) {
-      setNodes(initialData.nodes || []);
-      setEdges(initialData.edges || []);
-      if (initialData.name) {
-        setWorkflowName(initialData.name);
-      }
-      if (initialData.id) {
-        setWorkflowId(initialData.id);
-      }
-    } else if (taskId) {
-      // If we have a taskId but no initialData, try to load from the task clusters
-      const loadTaskClusters = async () => {
-        try {
-          const response = await fetch(ENDPOINTS.TASK_CLUSTERS(taskId));
-          if (!response.ok) throw new Error('Failed to fetch clusters');
-          const data = await response.json();
-          
-          // Convert clusters to workflow nodes and edges
-          const workflowNodes = data.nodes.map((node, index) => ({
-            id: node.id,
-            type: 'step',
-            position: { x: 100 + (index % 3) * 200, y: 100 + Math.floor(index / 3) * 100 },
-            data: { label: node.label || `Step ${index + 1}` }
-          }));
-          
-          const workflowEdges = data.links.map((link, index) => ({
-            id: `e-${index}`,
-            source: link.source,
-            target: link.target,
-            type: 'flowConnector'
-          }));
-          
-          setNodes(workflowNodes);
-          setEdges(workflowEdges);
-        } catch (err) {
-          console.error('Error loading task clusters:', err);
-        }
-      };
-      
-      loadTaskClusters();
+    if (structuredWorkflow && structuredWorkflow.nodes) {
+      const initialNodes = structuredWorkflow.nodes.map((node, index) => ({
+        id: node.id,
+        type: 'actionStep',
+        position: { x: 250, y: index * 200 },
+        data: {
+          label: node.data.label,
+          description: node.data.description,
+          confidence_score: node.data.confidence_score,
+          raw_actions: node.data.raw_actions,
+          status: null, // Initial status
+        },
+      }));
+      const initialEdges = structuredWorkflow.edges.map(edge => ({
+        ...edge,
+        animated: false,
+        style: { stroke: '#6b7280', strokeWidth: 2 },
+      }));
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+      setExecutionLogs([]);
+      setIsExecuting(false);
     }
-  }, [initialData, taskId]);
+  }, [structuredWorkflow]);
 
-  // Handle connections between nodes
-  const onConnect = useCallback(
-    (params) => setEdges((eds) => addEdge({ ...params, type: 'flowConnector' }, eds)),
-    [setEdges]
-  );
-
-  // Handle drag over for new node creation
-  const onDragOver = useCallback((event) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
-
-  // Handle drop for new node creation
-  const onDrop = useCallback(
-    (event) => {
-      event.preventDefault();
-
-      const reactFlowBounds = reactFlowWrapper.current.getBoundingClientRect();
-      const type = event.dataTransfer.getData('application/reactflow');
-      
-      // Check if the dropped element is valid
-      if (typeof type === 'undefined' || !type) {
-        return;
-      }
-
-      // Get position from drop coordinates
-      const position = reactFlowInstance.project({
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
-      });
-      
-      // Check if we have predefined action data
-      let nodeData = { 
-        label: `${type.charAt(0).toUpperCase() + type.slice(1)}`,
-      };
-      
-      try {
-        const actionJson = event.dataTransfer.getData('application/json');
-        if (actionJson) {
-          const action = JSON.parse(actionJson);
-          nodeData = {
-            ...nodeData,
-            label: action.name || nodeData.label,
-            ...action.params
-          };
-        }
-      } catch (err) {
-        console.error('Error parsing action data:', err);
-      }
-      
-      // Add type-specific default data
-      if (type === 'approval') {
-        nodeData.requiresApproval = true;
-      } else if (type === 'decision') {
-        nodeData.conditions = [];
-      } else if (type === 'trigger') {
-        nodeData.triggerType = 'manual';
-      }
-      
-      // Create a new node
-      const newNode = {
-        id: `${type}-${Date.now()}`,
-        type,
-        position,
-        data: nodeData,
-      };
-
-      setNodes((nds) => nds.concat(newNode));
-    },
-    [reactFlowInstance, setNodes]
-  );
-
-  // Handle node selection
-  const onNodeClick = useCallback((_, node) => {
+  const onNodeClick = useCallback((event, node) => {
     setSelectedNode(node);
   }, []);
 
-  // Handle node update
-  const onNodeUpdate = useCallback((nodeId, newData) => {
+  const handlePaneClick = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
+
+  const updateNodeData = (nodeId, newData) => {
     setNodes((nds) =>
       nds.map((node) => {
         if (node.id === nodeId) {
-          return { ...node, data: { ...node.data, ...newData } };
+          return {
+            ...node,
+            data: { ...node.data, ...newData },
+          };
         }
         return node;
       })
     );
-  }, [setNodes]);
-
-  // Handle workflow save
-  const saveWorkflow = async () => {
-    if (!workflowName.trim()) {
-      setSaveError('Please provide a workflow name');
-      return;
-    }
-
-    setIsSaving(true);
-    setSaveError(null);
-    setSaveSuccess(false);
-
-    try {
-      const workflowData = {
-        name: workflowName,
-        description: `Workflow created from task ${taskId}`,
-        status: "draft",
-        created_by: "user",
-        task_id: taskId,
-        nodes: nodes,
-        edges: edges
-      };
-
-      // If we have a workflow ID, update instead of create
-      const url = workflowId 
-        ? `${ENDPOINTS.WORKFLOWS}/${workflowId}`
-        : ENDPOINTS.WORKFLOWS;
-      
-      const method = workflowId ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method: method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(workflowData),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to save workflow: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      setSaveSuccess(true);
-      
-      // If this was a new workflow, store the ID
-      if (!workflowId && result.id) {
-        setWorkflowId(result.id);
-      }
-      
-      console.log('Workflow saved:', result);
-    } catch (error) {
-      console.error('Error saving workflow:', error);
-      setSaveError(error.message);
-    } finally {
-      setIsSaving(false);
-    }
   };
   
-  // Handle workflow execution
-  const executeWorkflow = async () => {
-    // Must save first if no workflow ID
-    if (!workflowId) {
-      setSaveError('Please save the workflow before executing');
-      return;
+  // --- Live Execution Simulation ---
+  const handleRunWorkflow = () => {
+    if (!onRun) {
+        console.warn("onRun handler not provided to WorkflowEditor");
+        return;
     }
     
     setIsExecuting(true);
-    setExecutionError(null);
+    setExecutionLogs(['Workflow execution started...']);
     
-    try {
-      const response = await fetch(`${ENDPOINTS.WORKFLOW_BY_ID(workflowId)}/trigger`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to trigger workflow: ${response.statusText}`);
-      }
-      
-      const result = await response.json();
-      console.log('Workflow triggered:', result);
-      
-      // If we have an execution ID, show the monitor
-      if (result.execution_id) {
-        setExecutionId(result.execution_id);
-        setShowExecutionMonitor(true);
-      }
-    } catch (error) {
-      console.error('Error executing workflow:', error);
-      setExecutionError(error.message);
-    } finally {
-      setIsExecuting(false);
-    }
-  };
+    // Reset node statuses
+    setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, status: 'pending' } })));
+    
+    const executionOrder = structuredWorkflow.nodes.map(n => n.id);
+    let currentStep = 0;
 
-  // Handle predefined action selection
-  const handleActionSelect = (action) => {
-    // Create a node from the selected action
-    if (!reactFlowInstance) return;
-    
-    // Create node in the center of the visible area
-    const centerX = reactFlowInstance.getViewport().x + reactFlowInstance.getViewport().width / 2;
-    const centerY = reactFlowInstance.getViewport().y + reactFlowInstance.getViewport().height / 2;
-    
-    const newNode = {
-      id: `${action.type}-${Date.now()}`,
-      type: action.type,
-      position: { x: centerX, y: centerY },
-      data: {
-        label: action.name || action.type,
-        ...action.params
-      },
+    const runNextStep = () => {
+      if (currentStep >= executionOrder.length) {
+        setExecutionLogs(logs => [...logs, 'Workflow execution finished.']);
+        setIsExecuting(false);
+        return;
+      }
+
+      const nodeId = executionOrder[currentStep];
+      
+      // Mark current step as running
+      setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, status: 'running' } } : n));
+      setExecutionLogs(logs => [...logs, `Executing step: ${nodes.find(n => n.id === nodeId)?.data.label}`]);
+
+      // Simulate step execution
+      setTimeout(() => {
+        const success = Math.random() > 0.1; // 90% success rate
+        const newStatus = success ? 'completed' : 'failed';
+        
+        setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, status: newStatus } } : n));
+        setExecutionLogs(logs => [...logs, `Step ${success ? 'completed' : 'failed'}: ${nodes.find(n => n.id === nodeId)?.data.label}`]);
+
+        if (success) {
+          currentStep++;
+          runNextStep();
+        } else {
+          setExecutionLogs(logs => [...logs, 'Workflow execution halted due to failure.']);
+          setIsExecuting(false);
+        }
+      }, 2000 + Math.random() * 1000); // Simulate 2-3 second execution time
     };
-    
-    setNodes((nds) => nds.concat(newNode));
-  };
-  
-  // Close execution monitor
-  const closeExecutionMonitor = () => {
-    setShowExecutionMonitor(false);
+
+    runNextStep();
+    onRun(structuredWorkflow);
   };
 
   return (
-    <div className="workflow-editor-container">
+    <div className="flex h-full bg-gray-100">
       <ReactFlowProvider>
-        <div className="reactflow-wrapper" ref={reactFlowWrapper}>
+        <div className="flex-grow h-full relative">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onInit={setReactFlowInstance}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
             onNodeClick={onNodeClick}
+            onPaneClick={handlePaneClick}
             nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
             fitView
           >
+            <Background />
             <Controls />
-            <Background variant="dots" gap={12} size={1} />
-            
-            {/* Toolbar */}
-            <Panel position="top-left" className="workflow-toolbar">
-              <div className="toolbar-header">
-                <input
-                  type="text"
-                  value={workflowName}
-                  onChange={(e) => setWorkflowName(e.target.value)}
-                  placeholder="Workflow Name"
-                  className="workflow-name-input"
-                />
-                <div className="button-group">
-                  <button 
-                    onClick={saveWorkflow} 
-                    className="save-button"
-                    disabled={isSaving}
-                  >
-                    {isSaving ? 'Saving...' : 'Save Workflow'}
-                  </button>
-                  <button 
-                    onClick={executeWorkflow} 
-                    className="execute-button"
-                    disabled={isExecuting || !workflowId}
-                  >
-                    {isExecuting ? 'Executing...' : 'Execute'}
-                  </button>
-                </div>
-              </div>
-              
-              {saveError && <div className="error-message">{saveError}</div>}
-              {saveSuccess && <div className="success-message">Workflow saved successfully!</div>}
-              {executionError && <div className="error-message">{executionError}</div>}
-              
-              {/* Replace node palette with PredefinedActionsPanel */}
-              <PredefinedActionsPanel onActionSelect={handleActionSelect} />
-            </Panel>
-            
-            {/* Replace with new NodePropertiesPanel */}
-            {selectedNode && (
-              <Panel position="top-right">
-                <NodePropertiesPanel 
-                  selectedNode={selectedNode}
-                  onUpdate={onNodeUpdate}
-                  onClose={() => setSelectedNode(null)}
-                />
-              </Panel>
-            )}
-            
-            {/* Execution Monitor (conditionally rendered) */}
-            {showExecutionMonitor && executionId && (
-              <div className="execution-monitor-overlay">
-                <ExecutionMonitor 
-                  executionId={executionId}
-                  workflowId={workflowId}
-                  onClose={closeExecutionMonitor}
-                />
-              </div>
-            )}
+            <MiniMap />
           </ReactFlow>
+          <div className="absolute top-4 left-4 z-10 bg-white p-2 rounded shadow-md">
+            <button 
+              onClick={handleRunWorkflow} 
+              disabled={isExecuting}
+              className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded disabled:bg-gray-400"
+            >
+              {isExecuting ? 'Executing...' : 'Run Workflow'}
+            </button>
+          </div>
         </div>
       </ReactFlowProvider>
-      
-      <style jsx>{`
-        .button-group {
-          display: flex;
-          gap: 8px;
-        }
-        
-        .execute-button {
-          padding: 8px 16px;
-          background: #4caf50;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-weight: 500;
-        }
-        
-        .execute-button:hover {
-          background: #388e3c;
-        }
-        
-        .execute-button:disabled {
-          background: #ccc;
-          cursor: not-allowed;
-        }
-        
-        .execution-monitor-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 10;
-        }
-      `}</style>
+
+      {/* Side Panel for Editing and Monitoring */}
+      <div className="w-96 bg-white border-l border-gray-200 flex flex-col">
+        {selectedNode ? (
+          // Properties Editor
+          <div className="p-4 flex-grow">
+            <h3 className="text-xl font-bold mb-4">Edit Action Step</h3>
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700">Title</label>
+              <input
+                type="text"
+                value={selectedNode.data.label}
+                onChange={(e) => updateNodeData(selectedNode.id, { label: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">AI-Generated Description</label>
+              <textarea
+                rows="6"
+                value={selectedNode.data.description}
+                onChange={(e) => updateNodeData(selectedNode.id, { description: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+              ></textarea>
+            </div>
+             <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700">Confidence Score</label>
+                <p className="text-lg font-semibold">{`${Math.round(selectedNode.data.confidence_score * 100)}%`}</p>
+                {selectedNode.data.confidence_score < 0.8 && (
+                    <p className="text-sm text-yellow-600">Low confidence. Please review and refine the description for better accuracy.</p>
+                )}
+            </div>
+          </div>
+        ) : (
+          // Live Execution Monitor
+          <div className="p-4 flex-grow flex flex-col">
+            <h3 className="text-xl font-bold mb-4">Live Execution Monitor</h3>
+            <div className="bg-gray-800 text-white font-mono text-sm rounded-md p-4 flex-grow overflow-y-auto">
+              {executionLogs.map((log, index) => (
+                <div key={index} className="whitespace-pre-wrap">
+                  <span className="text-gray-500 mr-2">{`[${new Date().toLocaleTimeString()}]`}</span>
+                  <span>{log}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

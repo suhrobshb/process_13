@@ -25,6 +25,10 @@ If the Nix build fails, open the **“Shell” tab** at the bottom and run:
 
 ```bash
 pip install -r requirements.txt
+# New in the latest build:  
+# `evdev-binary` is now part of `requirements.txt` to enable low-level
+# keyboard / mouse capture for the recorder. Replit will compile it
+# automatically – no extra steps needed.
 ```
 
 ### Optional – Browser automation  
@@ -33,6 +37,8 @@ If you want to test Playwright actions as well (works in headless mode):
 ```bash
 pip install playwright
 python -m playwright install chromium
+# (Our `.replit` file already runs this on first boot, so you usually
+# don’t need to run it manually – it’s shown here for completeness.)
 ```
 
 *(Desktop automation via PyAutoGUI needs a GUI/display and is **disabled** in the Replit demo.)*
@@ -134,6 +140,8 @@ The Replit demo dashboard provides four tabs:
 | `openai.error.AuthenticationError`                | Add a valid `OPENAI_API_KEY` in Secrets. |
 | Playwright `Executable does not exist`            | Run `python -m playwright install chromium` in the Shell. |
 | Port `8080` already in use                        | Replit auto-assigns; ensure only one `uvicorn.run()` instance. |
+| `evdev` compile fails (very rare)                 | Re-run `pip install evdev-binary --force-reinstall`; ensure `.replit` uses the latest requirements. |
+| Log output missing                                | Logging level defaults to **INFO**; set `LOG_LEVEL=DEBUG` in Secrets to see more details. |
 
 ---
 

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Engine - Comprehensive Interface Preview</title>
+    <style>
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #50e3c2;
+            --danger-color: #e74c3c;
+            --warning-color: #f5a623;
+            --bg-color: #f4f7f9;
+            --panel-bg-color: #ffffff;
+            --text-color: #34495e;
+            --text-light-color: #7f8c8d;
+            --border-color: #e1e4e8;
+            --shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 240px;
+            background-color: #2c3e50;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid #34495e;
+        }
+        
+        .sidebar-header h1 {
+            font-size: 1.5rem;
+            margin: 0;
+        }
+
+        .sidebar-nav {
+            flex-grow: 1;
+            padding: 20px 0;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 20px;
+            color: #bdc3c7;
+            text-decoration: none;
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .nav-item:hover {
+            background-color: #34495e;
+            color: white;
+        }
+
+        .nav-item.active {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+        }
+
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .main-header {
+            background-color: var(--panel-bg-color);
+            padding: 15px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        
+        .main-header h2 {
+            margin: 0;
+            font-size: 1.8rem;
+        }
+
+        .header-actions button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: background-color 0.2s;
+        }
+        
+        .header-actions button:hover {
+            background-color: #3a7ac8;
+        }
+
+        .content-area {
+            flex-grow: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .grid {
+            display: grid;
+            gap: 24px;
+        }
+        
+        .grid-3-cols {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .card {
+            background-color: var(--panel-bg-color);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+        
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0 0 15px 0;
+        }
+        
+        .metric-card {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        
+        .metric-label {
+            font-size: 1rem;
+            color: var(--text-light-color);
+        }
+        
+        .deployment-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--secondary-color);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(80, 227, 194, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(80, 227, 194, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(80, 227, 194, 0); }
+        }
+        
+        .status-text {
+            font-weight: 600;
+        }
+        
+        .status-url {
+            font-size: 0.85rem;
+            color: var(--text-light-color);
+            word-break: break-all;
+        }
+        
+        .activity-feed-item {
+            display: flex;
+            gap: 15px;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .activity-feed-item:last-child {
+            border-bottom: none;
+        }
+        
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .activity-icon.success { background-color: #e6f9f1; color: var(--secondary-color); }
+        .activity-icon.info { background-color: #eaf4fc; color: var(--primary-color); }
+        
+        .activity-content p { margin: 0; }
+        .activity-title { font-weight: 500; }
+        .activity-time { font-size: 0.8rem; color: var(--text-light-color); }
+        
+        .chart-placeholder {
+            height: 250px;
+            background-color: #f8f9fa;
+            border: 1px dashed var(--border-color);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-light-color);
+        }
+        
+        .ai-learning-card {
+            background: linear-gradient(135deg, #4a90e2, #50e3c2);
+            color: white;
+        }
+        
+        .ai-learning-card .card-title {
+            color: white;
+        }
+        
+        .confidence-score {
+            font-size: 3rem;
+            font-weight: 700;
+            text-align: center;
+        }
+        
+        .confidence-label {
+            text-align: center;
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+        
+        .integration-suggestion {
+            background-color: rgba(255, 255, 255, 0.15);
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        
+        .integration-suggestion p { margin: 0 0 10px 0; }
+        
+        .integration-suggestion button {
+            background-color: white;
+            color: var(--primary-color);
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+                <h1>AI Engine</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                    <span>Workflows</span>
+                </a>
+                <a href="#" class="nav-item">
+                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3" fill="currentColor"></circle></svg>
+                    <span>Recordings</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                    <span>AI Learning Center</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h1a4 4 0 0 0 0 8H2"></path><line x1="6" y1="12" x2="18" y2="12"></line></svg>
+                    <span>Integrations</span>
+                </a>
+            </nav>
+        </aside>
+
+        <div class="main-content">
+            <header class="main-header">
+                <h2>Dashboard</h2>
+                <div class="header-actions">
+                    <button>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3" fill="currentColor"></circle></svg>
+                        <span>Record New Process</span>
+                    </button>
+                </div>
+            </header>
+            <main class="content-area">
+                <div class="grid grid-3-cols">
+                    <div class="card metric-card">
+                        <div class="card-title">Workflows Automated</div>
+                        <div class="metric-value">42</div>
+                        <p class="metric-label">+5 this week</p>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="card-title">Hours Saved (Monthly)</div>
+                        <div class="metric-value">128</div>
+                        <p class="metric-label">Equivalent to 0.8 FTE</p>
+                    </div>
+                    <div class="card metric-card">
+                        <div class="card-title">Process Accuracy</div>
+                        <div class="metric-value" style="color: var(--secondary-color);">99.7%</div>
+                        <p class="metric-label">Up from 92% manual accuracy</p>
+                    </div>
+                </div>
+                
+                <div class="grid" style="grid-template-columns: 2fr 1fr; margin-top: 24px;">
+                    <div class="card">
+                        <h3 class="card-title">Recent Activity</h3>
+                        <div class="activity-feed">
+                            <div class="activity-feed-item">
+                                <div class="activity-icon success">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                                <div class="activity-content">
+                                    <p class="activity-title">"Automated Invoice Processing" executed successfully.</p>
+                                    <p class="activity-time">2 minutes ago</p>
+                                </div>
+                            </div>
+                             <div class="activity-feed-item">
+                                <div class="activity-icon info">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="3" fill="currentColor"></circle></svg>
+                                </div>
+                                <div class="activity-content">
+                                    <p class="activity-title">New recording "Onboarding Email Sequence" completed.</p>
+                                    <p class="activity-time">1 hour ago</p>
+                                </div>
+                            </div>
+                             <div class="activity-feed-item">
+                                <div class="activity-icon success">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                                <div class="activity-content">
+                                    <p class="activity-title">"Daily Sales Report" workflow ran successfully.</p>
+                                    <p class="activity-time">8 hours ago</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h3 class="card-title">Deployment Status</h3>
+                        <div class="deployment-status">
+                            <div class="status-dot"></div>
+                            <span class="status-text">Live on Google Cloud</span>
+                        </div>
+                        <p class="status-url">ai-engine.gcp.run.app</p>
+                        <hr style="border: none; border-top: 1px solid var(--border-color); margin: 15px 0;">
+                        <h3 class="card-title">AI Learning Center</h3>
+                        <div class="ai-learning-card">
+                            <div class="card-title" style="padding: 15px 15px 0;">Process Confidence</div>
+                            <div class="confidence-score">87%</div>
+                            <p class="confidence-label">AI understanding of your processes</p>
+                            <div class="integration-suggestion">
+                                <p><strong>Suggestion:</strong> Connect your Outlook account via API to improve email processing accuracy by 15%.</p>
+                                <button>Connect Now</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card" style="margin-top: 24px;">
+                    <h3 class="card-title">Workflow Executions This Month</h3>
+                    <div class="chart-placeholder">
+                        Chart Placeholder (e.g., Bar chart showing daily executions)
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+</body>
+</html>

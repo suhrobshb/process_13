@@ -1,379 +1,228 @@
 """
 Browser Automation Runner
+=========================
 
-This module provides a Runner implementation for browser automation using Playwright.
-It allows workflows to control web browsers, navigate to URLs, interact with web elements,
-fill forms, and perform other browser-based actions as part of an automated workflow.
+This module provides a comprehensive runner for automating web browser interactions
+using the Playwright library. It acts as a "digital employee" for web-based tasks,
+allowing the AI Engine to navigate websites, fill forms, click elements, extract
+data, and perform complex sequences of actions as defined in a workflow.
+
+This runner is designed to be robust, with detailed error handling and a wide
+range of supported actions to cover most web automation scenarios.
 """
 
 import os
 import time
 import logging
-import asyncio
-import json
-from typing import Dict, Any, List, Optional
-from playwright.sync_api import sync_playwright, Page, Browser, ElementHandle
-from urllib.parse import urlparse
+from typing import Dict, Any, List
 
-# Set up logging
-logger = logging.getLogger("browser_runner")
+# Playwright is the core library for browser automation.
+# It's imported with a try-except block for graceful failure in environments
+# where it might not be installed.
+try:
+    from playwright.sync_api import sync_playwright, Page, Browser, ElementHandle, Playwright, expect
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    # Define dummy classes so the file can be imported without Playwright
+    Page, Browser, ElementHandle, Playwright, expect = (object, object, object, object, object)
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
 
 class BrowserRunner:
     """
-    Runner for executing browser automation actions using Playwright.
-    
-    This runner can be used to automate web browser interactions
-    as part of a workflow, including navigation, clicking elements,
-    filling forms, and extracting data.
+    Executes a sequence of browser automation actions using Playwright.
     """
-    
+
     def __init__(self, step_id: str, params: Dict[str, Any]):
         """
-        Initialize the Browser Runner with step parameters.
-        
+        Initializes the Browser Runner.
+
         Args:
-            step_id: Unique identifier for this step in the workflow
-            params: Dictionary containing the actions to perform
+            step_id (str): A unique identifier for this step.
+            params (Dict[str, Any]): Parameters for the step, including the list of actions.
         """
+        if not PLAYWRIGHT_AVAILABLE:
+            raise ImportError("Browser automation is not available. Please install Playwright with 'pip install playwright' and run 'playwright install'.")
+
         self.step_id = step_id
         self.actions = params.get("actions", [])
-        self.timeout = params.get("timeout", 60)  # Default 60 second timeout
-        self.browser_type = params.get("browser_type", "chromium")  # chromium, firefox, webkit
-        self.headless = params.get("headless", True)  # Run headless by default
-        self.screenshots_dir = params.get("screenshots_dir", "browser_screenshots")
-        self.default_navigation_timeout = params.get("navigation_timeout", 30000)  # 30 seconds
-        
+        self.timeout = params.get("timeout", 120)  # Overall step timeout in seconds
+        self.browser_type = params.get("browser_type", "chromium").lower()
+        self.headless = params.get("headless", True)
+        self.screenshots_dir = params.get("screenshots_dir", f"storage/screenshots/{self.step_id}")
+        self.default_action_timeout = params.get("action_timeout", 30000)  # Default timeout for individual actions in ms
+
         # Ensure screenshots directory exists
-        if not os.path.exists(self.screenshots_dir):
-            os.makedirs(self.screenshots_dir)
-    
+        os.makedirs(self.screenshots_dir, exist_ok=True)
+        logger.info(f"BrowserRunner for step '{self.step_id}' initialized. Browser: {self.browser_type}, Headless: {self.headless}")
+
     def execute(self) -> Dict[str, Any]:
         """
-        Execute the browser automation actions.
-        
-        Returns:
-            Dictionary with success status and results or error information
+        Executes the full sequence of browser actions.
         """
-        logger.info(f"Starting execution of browser automation step {self.step_id}")
+        logger.info(f"Executing browser automation step: {self.step_id}")
         start_time = time.time()
-        
+        action_results = []
+        overall_success = True
+
         try:
             with sync_playwright() as playwright:
-                # Select browser type
-                if self.browser_type == "firefox":
-                    browser_instance = playwright.firefox
-                elif self.browser_type == "webkit":
-                    browser_instance = playwright.webkit
-                else:
-                    browser_instance = playwright.chromium
-                
-                # Launch browser
-                browser = browser_instance.launch(headless=self.headless)
-                
-                # Create a new page
-                page = browser.new_page(
-                    viewport={'width': 1280, 'height': 800},
-                    accept_downloads=True
-                )
-                page.set_default_navigation_timeout(self.default_navigation_timeout)
-                
-                # Execute actions
-                results = []
-                for i, action in enumerate(self.actions):
-                    # Check for timeout
+                browser = self._launch_browser(playwright)
+                page = browser.new_page()
+                page.set_default_timeout(self.default_action_timeout)
+
+                for i, action_config in enumerate(self.actions, 1):
                     if time.time() - start_time > self.timeout:
-                        raise TimeoutError(f"Browser automation step {self.step_id} timed out after {self.timeout} seconds")
+                        raise TimeoutError(f"Step '{self.step_id}' timed out after {self.timeout} seconds.")
+
+                    logger.info(f"Executing action {i}/{len(self.actions)}: {action_config.get('type')}")
+                    action_result = self._execute_action(page, action_config)
+                    action_results.append(action_result)
+
+                    if not action_result["success"]:
+                        overall_success = False
+                        if action_config.get("stop_on_failure", True):
+                            logger.error(f"Action failed, halting execution of step '{self.step_id}'.")
+                            break
                     
-                    # Execute the action
-                    result = self._execute_action(page, action, i)
-                    results.append(result)
-                    
-                    # Apply delay if specified
-                    delay = action.get("delay", 0.5)
-                    time.sleep(delay)
-                
-                # Take final screenshot
-                final_screenshot = f"{self.screenshots_dir}/{self.step_id}_final_{int(time.time())}.png"
-                page.screenshot(path=final_screenshot)
-                
-                # Close browser
+                    time.sleep(action_config.get("delay_after", 0.25))
+
+                # Take a final screenshot for verification
+                final_screenshot_path = os.path.join(self.screenshots_dir, f"final_state_{int(time.time())}.png")
+                page.screenshot(path=final_screenshot_path, full_page=True)
+                logger.info(f"Final screenshot saved to {final_screenshot_path}")
+
                 browser.close()
-                
-                logger.info(f"Step {self.step_id} completed in {time.time() - start_time:.2f}s")
-                return {
-                    "success": True,
-                    "result": {
-                        "actions_executed": len(results),
-                        "action_results": results,
-                        "final_screenshot": final_screenshot,
-                        "execution_time": time.time() - start_time
-                    }
-                }
-                
+
         except Exception as e:
-            logger.error(f"Error in browser automation step {self.step_id}: {str(e)}")
+            logger.error(f"An unexpected error occurred during execution of step '{self.step_id}': {e}", exc_info=True)
             return {
                 "success": False,
-                "error": str(e),
-                "partial_results": results if 'results' in locals() else []
+                "error": f"Step execution failed: {str(e)}",
+                "results": action_results,
+                "execution_time_seconds": time.time() - start_time,
             }
-    
-    def _execute_action(self, page: Page, action: Dict[str, Any], index: int) -> Dict[str, Any]:
-        """
-        Execute a single browser automation action.
-        
-        Args:
-            page: Playwright Page object
-            action: Dictionary describing the action to perform
-            index: Index of this action in the sequence
-            
-        Returns:
-            Dictionary with action result information
-        """
-        action_type = action.get("type", "")
-        logger.debug(f"Executing browser action {index}: {action_type}")
-        
-        result = {"type": action_type, "success": True}
-        
+
+        execution_time = time.time() - start_time
+        logger.info(f"Finished execution of step '{self.step_id}' in {execution_time:.2f} seconds.")
+
+        return {
+            "success": overall_success,
+            "results": action_results,
+            "execution_time_seconds": execution_time,
+        }
+
+    def _launch_browser(self, playwright: Playwright) -> Browser:
+        """Launches the specified browser type."""
+        if self.browser_type == "firefox":
+            return playwright.firefox.launch(headless=self.headless)
+        if self.browser_type == "webkit":
+            return playwright.webkit.launch(headless=self.headless)
+        return playwright.chromium.launch(headless=self.headless)
+
+    def _execute_action(self, page: Page, action: Dict[str, Any]) -> Dict[str, Any]:
+        """Executes a single browser action."""
+        action_type = action.get("type", "unknown").lower()
+        start_time = time.time()
+        result = {"action_type": action_type, "success": True, "details": ""}
+
         try:
+            selector = action.get("selector", "")
+            
             if action_type == "goto":
                 url = action.get("url", "")
-                if not url:
-                    raise ValueError("No URL specified for goto action")
-                
-                # Ensure URL has protocol
-                if not url.startswith(("http://", "https://")):
-                    url = f"https://{url}"
-                
-                # Navigate to URL
-                response = page.goto(url, wait_until=action.get("wait_until", "load"))
-                result["details"] = f"Navigated to {url}"
-                result["status"] = response.status if response else None
-                result["url"] = page.url
-                
+                page.goto(url, wait_until=action.get("wait_until", "load"))
+                result['details'] = f"Navigated to {url}"
+            
             elif action_type == "click":
-                selector = action.get("selector", "")
-                if not selector:
-                    raise ValueError("No selector specified for click action")
-                
-                # Wait for selector to be visible
-                page.wait_for_selector(selector, state="visible", timeout=action.get("timeout", 10000))
-                
-                # Click element
-                page.click(selector, delay=action.get("click_delay", 0), button=action.get("button", "left"))
-                result["details"] = f"Clicked element with selector: {selector}"
-                
+                expect(page.locator(selector)).to_be_visible()
+                page.click(selector, button=action.get("button", "left"), delay=action.get("delay", 50))
+                result['details'] = f"Clicked element: '{selector}'"
+            
             elif action_type == "fill":
-                selector = action.get("selector", "")
-                text = action.get("text", "")
-                if not selector:
-                    raise ValueError("No selector specified for fill action")
-                
-                # Wait for selector to be visible
-                page.wait_for_selector(selector, state="visible", timeout=action.get("timeout", 10000))
-                
-                # Fill form field
-                page.fill(selector, text)
-                result["details"] = f"Filled text in element with selector: {selector}"
-                
-            elif action_type == "select":
-                selector = action.get("selector", "")
-                value = action.get("value", "")
-                if not selector:
-                    raise ValueError("No selector specified for select action")
-                
-                # Select option
-                page.select_option(selector, value=value)
-                result["details"] = f"Selected option with value '{value}' in selector: {selector}"
-                
-            elif action_type == "check":
-                selector = action.get("selector", "")
-                if not selector:
-                    raise ValueError("No selector specified for check action")
-                
-                # Check checkbox
-                page.check(selector)
-                result["details"] = f"Checked checkbox with selector: {selector}"
-                
-            elif action_type == "uncheck":
-                selector = action.get("selector", "")
-                if not selector:
-                    raise ValueError("No selector specified for uncheck action")
-                
-                # Uncheck checkbox
-                page.uncheck(selector)
-                result["details"] = f"Unchecked checkbox with selector: {selector}"
-                
-            elif action_type == "screenshot":
-                selector = action.get("selector")
-                filename = action.get("filename", f"{self.screenshots_dir}/{self.step_id}_{index}_{int(time.time())}.png")
-                
-                if selector:
-                    # Screenshot specific element
-                    element = page.wait_for_selector(selector, state="visible", timeout=action.get("timeout", 10000))
-                    element.screenshot(path=filename)
-                    result["details"] = f"Screenshot of element {selector} saved to {filename}"
-                else:
-                    # Screenshot entire page
-                    page.screenshot(path=filename, full_page=action.get("full_page", False))
-                    result["details"] = f"Screenshot of page saved to {filename}"
-                
-                result["filename"] = filename
-                
-            elif action_type == "wait_for_selector":
-                selector = action.get("selector", "")
-                if not selector:
-                    raise ValueError("No selector specified for wait_for_selector action")
-                
-                # Wait for selector
-                state = action.get("state", "visible")  # visible, hidden, attached, detached
-                timeout = action.get("timeout", 30000)
-                page.wait_for_selector(selector, state=state, timeout=timeout)
-                result["details"] = f"Waited for selector: {selector} to be {state}"
-                
-            elif action_type == "wait_for_navigation":
-                # Wait for navigation to complete
-                page.wait_for_navigation(
-                    url=action.get("url"),
-                    wait_until=action.get("wait_until", "load"),
-                    timeout=action.get("timeout", 30000)
-                )
-                result["details"] = f"Waited for navigation to complete, current URL: {page.url}"
-                result["url"] = page.url
-                
-            elif action_type == "wait_for_load_state":
-                # Wait for specific load state
-                state = action.get("state", "load")  # load, domcontentloaded, networkidle
-                page.wait_for_load_state(state, timeout=action.get("timeout", 30000))
-                result["details"] = f"Waited for page to reach load state: {state}"
-                
-            elif action_type == "press":
-                selector = action.get("selector", "")
-                key = action.get("key", "")
-                if not key:
-                    raise ValueError("No key specified for press action")
-                
-                if selector:
-                    # Press key on specific element
-                    page.press(selector, key)
-                    result["details"] = f"Pressed key '{key}' on element with selector: {selector}"
-                else:
-                    # Press key on page
-                    page.keyboard.press(key)
-                    result["details"] = f"Pressed key '{key}' on page"
-                
+                expect(page.locator(selector)).to_be_visible()
+                page.fill(selector, action.get("text", ""))
+                result['details'] = f"Filled '{selector}' with text."
+            
             elif action_type == "type":
-                selector = action.get("selector", "")
-                text = action.get("text", "")
-                
+                expect(page.locator(selector)).to_be_visible()
+                page.type(selector, action.get("text", ""), delay=action.get("delay", 50))
+                result['details'] = f"Typed into '{selector}'."
+
+            elif action_type == "press":
+                expect(page.locator(selector)).to_be_visible()
+                page.press(selector, action.get("key", ""))
+                result['details'] = f"Pressed key '{action.get('key')}' on '{selector}'."
+
+            elif action_type == "screenshot":
+                filepath = os.path.join(self.screenshots_dir, action.get('filepath', f"action_{int(time.time())}.png"))
                 if selector:
-                    # Type on specific element
-                    page.type(selector, text, delay=action.get("delay", 100))
-                    result["details"] = f"Typed text on element with selector: {selector}"
+                    expect(page.locator(selector)).to_be_visible()
+                    page.locator(selector).screenshot(path=filepath)
+                    result['details'] = f"Screenshot of element '{selector}' saved."
                 else:
-                    # Type on page
-                    page.keyboard.type(text, delay=action.get("delay", 100))
-                    result["details"] = f"Typed text on page"
-                
-            elif action_type == "eval":
-                script = action.get("script", "")
-                if not script:
-                    raise ValueError("No script specified for eval action")
-                
-                # Evaluate JavaScript
-                eval_result = page.evaluate(script)
-                result["details"] = f"Evaluated JavaScript script"
-                result["eval_result"] = str(eval_result)
-                
+                    page.screenshot(path=filepath, full_page=action.get("full_page", True))
+                    result['details'] = "Full page screenshot saved."
+                result['output'] = {"filepath": filepath}
+
+            elif action_type == "wait_for_selector":
+                state = action.get("state", "visible")
+                timeout = action.get("timeout") # Uses page default if None
+                page.wait_for_selector(selector, state=state, timeout=timeout)
+                result['details'] = f"Waited for selector '{selector}' to be {state}."
+
             elif action_type == "extract":
-                selector = action.get("selector", "")
+                expect(page.locator(selector)).to_be_visible()
+                element = page.locator(selector)
                 attribute = action.get("attribute")
-                
-                if not selector:
-                    raise ValueError("No selector specified for extract action")
-                
-                # Wait for selector
-                element = page.wait_for_selector(selector, state="visible", timeout=action.get("timeout", 10000))
-                
                 if attribute:
-                    # Extract attribute
                     value = element.get_attribute(attribute)
-                    result["details"] = f"Extracted attribute '{attribute}' from selector: {selector}"
+                    result['details'] = f"Extracted attribute '{attribute}' from '{selector}'."
                 else:
-                    # Extract text content
                     value = element.text_content()
-                    result["details"] = f"Extracted text content from selector: {selector}"
-                
-                result["extracted_value"] = value
-                
+                    result['details'] = f"Extracted text from '{selector}'."
+                result['output'] = {"value": value}
+            
             elif action_type == "extract_all":
-                selector = action.get("selector", "")
+                expect(page.locator(selector).first).to_be_visible()
+                elements = page.locator(selector).all()
                 attribute = action.get("attribute")
-                
-                if not selector:
-                    raise ValueError("No selector specified for extract_all action")
-                
-                # Wait for at least one element
-                page.wait_for_selector(selector, state="visible", timeout=action.get("timeout", 10000))
-                
-                # Get all elements
-                elements = page.query_selector_all(selector)
-                
                 values = []
                 for element in elements:
                     if attribute:
-                        # Extract attribute
-                        value = element.get_attribute(attribute)
+                        values.append(element.get_attribute(attribute))
                     else:
-                        # Extract text content
-                        value = element.text_content()
-                    values.append(value)
-                
-                result["details"] = f"Extracted values from {len(values)} elements matching selector: {selector}"
-                result["extracted_values"] = values
-                
-            elif action_type == "back":
-                # Go back in browser history
-                page.go_back(wait_until=action.get("wait_until", "load"))
-                result["details"] = f"Navigated back to {page.url}"
-                result["url"] = page.url
-                
-            elif action_type == "forward":
-                # Go forward in browser history
-                page.go_forward(wait_until=action.get("wait_until", "load"))
-                result["details"] = f"Navigated forward to {page.url}"
-                result["url"] = page.url
-                
-            elif action_type == "reload":
-                # Reload the page
-                page.reload(wait_until=action.get("wait_until", "load"))
-                result["details"] = f"Reloaded page {page.url}"
-                
-            elif action_type == "set_viewport":
-                width = action.get("width", 1280)
-                height = action.get("height", 800)
-                
-                # Set viewport size
-                page.set_viewport_size({"width": width, "height": height})
-                result["details"] = f"Set viewport size to {width}x{height}"
-                
+                        values.append(element.text_content())
+                result['details'] = f"Extracted {len(values)} values from '{selector}'."
+                result['output'] = {"values": values}
+
+            elif action_type == "eval":
+                script = action.get("script", "")
+                eval_result = page.evaluate(script)
+                result['details'] = "Executed JavaScript."
+                result['output'] = {"result": eval_result}
+
             elif action_type == "wait":
-                # Simple wait/sleep
-                duration = action.get("duration", 1)
-                time.sleep(duration)
-                result["details"] = f"Waited for {duration} seconds"
-                
+                time.sleep(action.get("duration", 1.0))
+                result['details'] = f"Waited for {action.get('duration', 1.0)} seconds."
+
             else:
-                raise ValueError(f"Unknown action type: {action_type}")
-                
+                raise ValueError(f"Unknown or unsupported action type: '{action_type}'")
+
         except Exception as e:
-            logger.error(f"Error executing browser action {index} ({action_type}): {str(e)}")
+            logger.error(f"Action '{action_type}' failed: {e}", exc_info=True)
             result["success"] = False
             result["error"] = str(e)
-            
-        return result
+            # Try to take a screenshot on failure for debugging
+            try:
+                error_path = os.path.join(self.screenshots_dir, f"error_{action_type}_{int(time.time())}.png")
+                page.screenshot(path=error_path)
+                result['error_screenshot'] = error_path
+            except Exception as screenshot_error:
+                logger.error(f"Could not take error screenshot: {screenshot_error}")
 
-# Register this runner with the factory
-def register_browser_runner(factory):
-    """Register the Browser Runner with the provided factory."""
-    factory.register("browser", BrowserRunner)
+        result["duration_seconds"] = time.time() - start_time
+        return result

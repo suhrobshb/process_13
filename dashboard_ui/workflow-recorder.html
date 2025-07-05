@@ -1,82 +1,3 @@
-#!/usr/bin/env python3
-"""
-AI Engine Replit Demo
-=====================
-
-This is a simplified version of the AI Engine designed to run on Replit.
-It provides a web interface for testing all core functionality:
-
-- Shell Runner: Execute shell commands
-- HTTP Runner: Make HTTP requests
-- Decision Runner: Test conditional logic
-- LLM Runner: Interact with language models (requires OpenAI API key)
-- Browser Runner: Automate browser interactions (if Playwright is available)
-
-Usage:
-    1. Set OPENAI_API_KEY in Replit Secrets for LLM functionality
-    2. Run this file directly in Replit
-    3. Access the web UI at the provided URL
-"""
-
-import os
-import sys
-import json
-import time
-import uuid
-import logging
-import asyncio
-import traceback
-from typing import Dict, List, Any, Optional
-from datetime import datetime
-from pathlib import Path
-
-# Configure environment for Replit
-os.environ["DATABASE_URL"] = "sqlite:///ai_engine_replit.db"
-if "OPENAI_API_KEY" not in os.environ:
-    # Check if running on Replit with secrets
-    if "REPL_ID" in os.environ and os.path.exists("/tmp/secrets.json"):
-        with open("/tmp/secrets.json") as f:
-            secrets = json.load(f)
-            if "OPENAI_API_KEY" in secrets:
-                os.environ["OPENAI_API_KEY"] = secrets["OPENAI_API_KEY"]
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("ai_engine_replit")
-
-# Import AI Engine components
-try:
-    from fastapi import FastAPI, Request, Form, Depends, HTTPException, BackgroundTasks, Body
-    from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-    from fastapi.staticfiles import StaticFiles
-    from fastapi.templating import Jinja2Templates
-    from sqlmodel import Session, select, SQLModel, Field, create_engine, Column, JSON
-    import uvicorn
-    
-    # Import AI Engine components
-    from ai_engine.database import create_db_and_tables, get_session, engine
-    from ai_engine.models.workflow import Workflow
-    from ai_engine.models.execution import Execution
-    from ai_engine.workflow_runners import RunnerFactory, execute_step
-    
-    IMPORTS_SUCCESS = True
-except ImportError as e:
-    IMPORTS_SUCCESS = False
-    IMPORT_ERROR = str(e)
-    logger.error(f"Failed to import required modules: {e}")
-
-# Create FastAPI app
-app = FastAPI(title="AI Engine Replit Demo")
-
-# Create templates directory if it doesn't exist
-TEMPLATES_DIR = Path("templates")
-TEMPLATES_DIR.mkdir(exist_ok=True)
-
-# The new, comprehensive UI template
-INDEX_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -313,6 +234,7 @@ INDEX_TEMPLATE = """
         }
 
         .component-item:hover {
+            background-color: #e0e6eb;
             transform: translateY(-2px);
             box-shadow: var(--shadow);
         }
@@ -1584,62 +1506,55 @@ INDEX_TEMPLATE = """
             }
 
             // Recording functions
-            async function startRecording() {
-                try {
-                    const response = await fetch('/recorder/start', { method: 'POST' });
-                    if (!response.ok) throw new Error('Failed to start recording');
-                    
-                    isRecording = true;
-                    recordingStartTime = new Date();
-                    recordingTimer = setInterval(updateRecordingTime, 1000);
-                    
-                    // Update UI
-                    recordBtn.disabled = true;
-                    stopBtn.disabled = false;
-                    recordingIndicator.classList.add('active');
-                    recordingDot.classList.add('active');
-                    recordingStatus.textContent = 'Recording';
-                    recordingPreview.classList.add('active');
-                    
-                    recordedActions = [];
-                    updateRecordedActionsList();
-                    
-                    showToast('success', 'Recording Started', 'Screen and actions are now being recorded');
-                    updateStatus('Recording in progress...');
-                } catch (error) {
-                    showToast('error', 'Error', 'Could not start recording: ' + error.message);
-                }
+            function startRecording() {
+                isRecording = true;
+                recordingStartTime = new Date();
+                recordingTimer = setInterval(updateRecordingTime, 1000);
+                
+                // Update UI
+                recordBtn.disabled = true;
+                stopBtn.disabled = false;
+                recordingIndicator.classList.add('active');
+                recordingDot.classList.add('active');
+                recordingStatus.textContent = 'Recording';
+                recordingPreview.classList.add('active');
+                
+                // Clear previous recorded actions
+                recordedActions = [];
+                updateRecordedActionsList();
+                
+                // Show toast
+                showToast('success', 'Recording Started', 'Screen and actions are now being recorded');
+                
+                // Update status
+                updateStatus('Recording in progress...');
+                
+                // Simulate recording (in a real implementation, this would call the backend API)
+                simulateRecording();
             }
 
-            async function stopRecording() {
+            function stopRecording() {
                 if (!isRecording) return;
                 
-                try {
-                    const response = await fetch('/recorder/stop', { method: 'POST' });
-                    if (!response.ok) throw new Error('Failed to stop recording');
-                    
-                    const data = await response.json();
-                    recordedActions = data.actions || [];
-                    
-                    isRecording = false;
-                    clearInterval(recordingTimer);
-                    
-                    // Update UI
-                    recordBtn.disabled = false;
-                    stopBtn.disabled = true;
-                    recordingIndicator.classList.remove('active');
-                    recordingDot.classList.remove('active');
-                    recordingStatus.textContent = 'Not Recording';
-                    recordingPreview.classList.remove('active');
-                    
-                    showToast('info', 'Recording Stopped', `Recorded ${recordedActions.length} actions`);
-                    updateStatus('Recording stopped. Processing actions...');
-                    
-                    updateRecordedActionsList();
-                    processRecordedActions();
-                } catch (error) {
-                    showToast('error', 'Error', 'Could not stop recording: ' + error.message);
-                }
+                isRecording = false;
+                clearInterval(recordingTimer);
+                
+                // Update UI
+                recordBtn.disabled = false;
+                stopBtn.disabled = true;
+                recordingIndicator.classList.remove('active');
+                recordingDot.classList.remove('active');
+                recordingStatus.textContent = 'Not Recording';
+                recordingPreview.classList.remove('active');
+                
+                // Show toast
+                showToast('info', 'Recording Stopped', `Recorded ${recordedActions.length} actions in ${formatTime(Math.floor((new Date() - recordingStartTime) / 1000))}`);
+                
+                // Update status
+                updateStatus('Recording stopped. Processing actions...');
+                
+                // Process recorded actions
+                processRecordedActions();
             }
 
             function updateRecordingTime() {
@@ -1659,6 +1574,79 @@ INDEX_TEMPLATE = """
                 recordingPreview.classList.toggle('minimized');
             }
 
+            // Simulate recording (for demo purposes)
+            function simulateRecording() {
+                // This function simulates recording by adding random actions at intervals
+                // In a real implementation, this would be replaced with actual recording logic
+                
+                const actionTypes = ['click', 'type', 'keypress', 'scroll', 'navigate'];
+                const elements = ['button', 'input', 'link', 'dropdown', 'checkbox', 'window'];
+                
+                // Add a simulated action every 2-5 seconds
+                const addAction = () => {
+                    if (!isRecording) return;
+                    
+                    const actionType = actionTypes[Math.floor(Math.random() * actionTypes.length)];
+                    const element = elements[Math.floor(Math.random() * elements.length)];
+                    const timestamp = new Date();
+                    
+                    let actionDetails = {};
+                    
+                    switch (actionType) {
+                        case 'click':
+                            actionDetails = {
+                                x: Math.floor(Math.random() * 1000),
+                                y: Math.floor(Math.random() * 800),
+                                element: element,
+                                id: `${element}_${Math.floor(Math.random() * 100)}`
+                            };
+                            break;
+                        case 'type':
+                            actionDetails = {
+                                text: 'Sample text input',
+                                element: 'input',
+                                id: `input_${Math.floor(Math.random() * 100)}`
+                            };
+                            break;
+                        case 'keypress':
+                            actionDetails = {
+                                key: ['Enter', 'Tab', 'Escape', 'ArrowDown'][Math.floor(Math.random() * 4)],
+                                element: element
+                            };
+                            break;
+                        case 'scroll':
+                            actionDetails = {
+                                direction: ['up', 'down'][Math.floor(Math.random() * 2)],
+                                amount: Math.floor(Math.random() * 500)
+                            };
+                            break;
+                        case 'navigate':
+                            actionDetails = {
+                                url: 'https://example.com/' + Math.random().toString(36).substring(7),
+                                title: 'Example Page'
+                            };
+                            break;
+                    }
+                    
+                    const action = {
+                        type: actionType,
+                        timestamp: timestamp,
+                        details: actionDetails
+                    };
+                    
+                    recordedActions.push(action);
+                    updateRecordedActionsList();
+                    
+                    // Schedule next action
+                    if (isRecording) {
+                        setTimeout(addAction, Math.random() * 3000 + 2000);
+                    }
+                };
+                
+                // Start adding actions
+                setTimeout(addAction, 2000);
+            }
+
             function updateRecordedActionsList() {
                 if (recordedActions.length === 0) {
                     recordedActionsList.innerHTML = '<p>No recorded actions yet. Start recording to capture actions.</p>';
@@ -1668,7 +1656,7 @@ INDEX_TEMPLATE = """
                 let html = '<div class="component-group"><div class="component-group-title">Recorded Actions</div><div class="component-list">';
                 
                 recordedActions.forEach((action, index) => {
-                    const time = new Date(action.timestamp).toTimeString().split(' ')[0];
+                    const time = action.timestamp.toTimeString().split(' ')[0];
                     let icon = '';
                     let title = '';
                     let description = '';
@@ -1746,6 +1734,10 @@ INDEX_TEMPLATE = """
             }
 
             function processRecordedActions() {
+                // In a real implementation, this would process the recorded actions
+                // and convert them into a workflow
+                
+                // For demo purposes, we'll just show a toast and update the status
                 setTimeout(() => {
                     updateStatus('Actions processed. Ready to create workflow.');
                     showToast('success', 'Actions Processed', 'Recorded actions are ready to be used in a workflow');
@@ -1753,7 +1745,11 @@ INDEX_TEMPLATE = """
             }
 
             function createWorkflowFromActions() {
+                // This function would create a workflow from recorded actions
+                
+                // For demo purposes, we'll create some nodes based on the recorded actions
                 clearCanvas();
+                
                 let x = 100;
                 let y = 100;
                 let lastNodeId = null;
@@ -1765,305 +1761,32 @@ INDEX_TEMPLATE = """
                     switch (action.type) {
                         case 'click':
                             type = 'desktop';
-                            params = { action: 'click', x: action.details.x, y: action.details.y };
+                            params = {
+                                action: 'click',
+                                x: action.details.x,
+                                y: action.details.y,
+                                element: action.details.element
+                            };
                             break;
                         case 'type':
                             type = 'desktop';
-                            params = { action: 'type', text: action.details.text };
+                            params = {
+                                action: 'type',
+                                text: action.details.text,
+                                element: action.details.element
+                            };
                             break;
                         case 'keypress':
                             type = 'desktop';
-                            params = { action: 'press', key: action.details.key };
+                            params = {
+                                action: 'keypress',
+                                key: action.details.key,
+                                element: action.details.element
+                            };
                             break;
                         case 'scroll':
                             type = 'desktop';
-                            params = { action: 'scroll', direction: action.details.direction, amount: action.details.amount };
-                            break;
-                        case 'navigate':
-                            type = 'browser';
-                            params = { action: 'goto', url: action.details.url };
-                            break;
-                    }
-                    
-                    if (type) {
-                        const node = {
-                            id: `node_${Date.now()}_${index}`,
-                            type: type,
-                            x: x,
-                            y: y,
-                            data: params
-                        };
-                        nodes.push(node);
-                        
-                        if (lastNodeId) {
-                            connections.push({
-                                id: `conn_${lastNodeId}_${node.id}`,
-                                from: lastNodeId,
-                                to: node.id
-                            });
-                        }
-                        
-                        lastNodeId = node.id;
-                        y += 120; // Stagger nodes vertically
-                    }
-                });
-                
-                render();
-                showToast('success', 'Workflow Created', 'Workflow generated from recorded actions');
-                updateStatus('Workflow created from recording');
-            }
-
-            // Other functions (drag/drop, rendering, etc.) go here...
-            // These would be extensive and are omitted for brevity, but the
-            // structure is in place to build them out.
-            
-            function handleDragStart(e) { /* ... */ }
-            function handleDragOver(e) { /* ... */ }
-            function handleDrop(e) { /* ... */ }
-            function handleRecordedActionDragStart(e) { /* ... */ }
-            function handleCanvasClick(e) { /* ... */ }
-            function handleCanvasMouseDown(e) { /* ... */ }
-            function handleCanvasMouseMove(e) { /* ... */ }
-            function handleCanvasMouseUp(e) { /* ... */ }
-            function render() { /* ... */ }
-            function openSaveWorkflowModal() { /* ... */ }
-            function closeSaveWorkflowModal() { /* ... */ }
-            async function saveWorkflow() { /* ... */ }
-            async function openLoadWorkflowModal() { /* ... */ }
-            function closeLoadWorkflowModal() { /* ... */ }
-            async function loadWorkflow() { /* ... */ }
-            function showSelectedWorkflowDetails() { /* ... */ }
-            function showToast(type, title, message) { /* ... */ }
-            function updateStatus(message) { /* ... */ }
-            function updateNodeCount() { /* ... */ }
-            function updateConnectionCount() { /* ... */ }
-            function zoomIn() { /* ... */ }
-            function zoomOut() { /* ... */ }
-            function resetZoom() { /* ... */ }
-            function handleCanvasWheel(e) { /* ... */ }
-            function undo() { /* ... */ }
-            function redo() { /* ... */ }
-            function deleteSelected() { /* ... */ }
-            function clearCanvas() { /* ... */ }
-            async function runWorkflow() { /* ... */ }
-            function closeProperties() { /* ... */ }
-
-            init();
-        });
-    </script>
-</body>
-</html>
-"""
-
-# Write template to file
-with open(TEMPLATES_DIR / "index.html", "w") as f:
-    f.write(INDEX_TEMPLATE)
-
-# Set up templates
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-# Initialize database
-if IMPORTS_SUCCESS:
-    try:
-        create_db_and_tables()
-        logger.info("Database initialized successfully")
-        DB_INITIALIZED = True
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        DB_INITIALIZED = False
-else:
-    DB_INITIALIZED = False
-
-# Check for desktop automation
-try:
-    import pyautogui
-    DESKTOP_AUTOMATION_AVAILABLE = True
-except ImportError:
-    DESKTOP_AUTOMATION_AVAILABLE = False
-
-# Check for browser automation
-try:
-    from playwright.sync_api import sync_playwright
-    BROWSER_AUTOMATION_AVAILABLE = True
-except ImportError:
-    BROWSER_AUTOMATION_AVAILABLE = False
-
-# --- API Endpoints ---
-
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    """Render the main workflow recorder and editor UI."""
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.post("/recorder/start")
-async def start_recording():
-    """Mock endpoint to start recording."""
-    logger.info("Received request to start recording")
-    # In a real application, this would trigger the agent
-    return JSONResponse(content={"status": "recording_started"})
-
-@app.post("/recorder/stop")
-async def stop_recording():
-    """Mock endpoint to stop recording and return simulated actions."""
-    logger.info("Received request to stop recording")
-    # Simulate a few recorded actions
-    actions = [
-        {"type": "click", "timestamp": datetime.utcnow().isoformat(), "details": {"x": 100, "y": 200, "element": "button"}},
-        {"type": "type", "timestamp": datetime.utcnow().isoformat(), "details": {"text": "Hello, AI Engine!", "element": "input"}},
-        {"type": "navigate", "timestamp": datetime.utcnow().isoformat(), "details": {"url": "https://example.com"}},
-        {"type": "scroll", "timestamp": datetime.utcnow().isoformat(), "details": {"direction": "down", "amount": 300}},
-    ]
-    return JSONResponse(content={"status": "recording_stopped", "actions": actions})
-
-@app.post("/api/workflows")
-async def save_workflow(workflow_data: Dict = Body(...)):
-    """Save a new or updated workflow."""
-    try:
-        with Session(engine) as session:
-            workflow = Workflow(
-                name=workflow_data.get("name", "New Workflow"),
-                description=workflow_data.get("description", ""),
-                status="active",
-                nodes=workflow_data.get("nodes", []),
-                edges=workflow_data.get("edges", []),
-                created_by="replit_user"
-            )
-            session.add(workflow)
-            session.commit()
-            session.refresh(workflow)
-            return JSONResponse(content={"status": "success", "id": workflow.id})
-    except Exception as e:
-        logger.error(f"Error saving workflow: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/workflows")
-async def list_workflows():
-    """List all saved workflows."""
-    try:
-        with Session(engine) as session:
-            workflows = session.exec(select(Workflow)).all()
-            return JSONResponse(content=[wf.model_dump() for wf in workflows])
-    except Exception as e:
-        logger.error(f"Error loading workflows: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/workflows/{workflow_id}")
-async def get_workflow(workflow_id: int):
-    """Get a specific workflow by ID."""
-    try:
-        with Session(engine) as session:
-            workflow = session.get(Workflow, workflow_id)
-            if not workflow:
-                raise HTTPException(status_code=404, detail="Workflow not found")
-            return JSONResponse(content=workflow.model_dump())
-    except Exception as e:
-        logger.error(f"Error loading workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/workflows/{workflow_id}/execute")
-async def execute_workflow_endpoint(workflow_id: int, background_tasks: BackgroundTasks):
-    """Execute a workflow."""
-    try:
-        from ai_engine.workflow_engine import execute_workflow_by_id
-        execution_id = execute_workflow_by_id(workflow_id)
-        return JSONResponse(content={"status": "execution_started", "execution_id": execution_id})
-    except Exception as e:
-        logger.error(f"Error executing workflow {workflow_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "ok", "imports": IMPORTS_SUCCESS, "database": DB_INITIALIZED}
-
-# --------------------------------------------------------------------------- #
-# Adaptive-Learning demo endpoints (Phase-2 proof-of-concept)                 #
-# --------------------------------------------------------------------------- #
-
-@app.post("/ai/analyze_recording")
-async def ai_analyze_recording(payload: Dict = Body(...)):
-    """
-    Mock endpoint – AI analyzes a raw recording payload and extracts
-    high-level business actions.  This would normally call an internal
-    learning engine, but here we return a static example so the route
-    is visible in the running demo.
-    """
-    # In a real implementation you would feed `payload` to an AI model.
-    example_actions = [
-        {
-            "id": "action_01",
-            "title": "Receive New Load Request",
-            "description": "AI detected a load request email and extracted origin / destination.",
-            "type": "system"
-        },
-        {
-            "id": "action_02",
-            "title": "Negotiate Rate",
-            "description": "AI observed user negotiating rate with broker in email thread.",
-            "type": "communication"
-        },
-    ]
-    return JSONResponse(content={
-        "status": "analysis_complete",
-        "actions": example_actions,
-        "notes": "This is a mock response – replace with real AI analysis."
-    })
-
-
-@app.get("/ai/suggest_integrations")
-async def ai_suggest_integrations():
-    """
-    Mock endpoint – AI suggests which software integrations provide the
-    highest value based on observed user behaviour.
-    """
-    suggestions = [
-        {"app": "Outlook", "integration_type": "oauth", "confidence": 0.92},
-        {"app": "Slack", "integration_type": "api_token", "confidence": 0.74},
-        {"app": "Generic UI Automation", "integration_type": "fallback", "confidence": 0.60},
-    ]
-    return JSONResponse(content={
-        "status": "ok",
-        "suggestions": suggestions
-    })
-
-
-@app.get("/ai/learning_dashboard", response_class=JSONResponse)
-async def ai_learning_dashboard():
-    """
-    Returns a high-level summary of what the Adaptive-Learning engine
-    has learned so far – placeholder data for demo purposes.
-    """
-    dashboard = {
-        "total_recordings_processed": 3,
-        "unique_apps_detected": ["Outlook", "Chrome", "Custom TMS"],
-        "confidence_score": 0.83,
-        "next_best_action": "Connect Outlook via OAuth for reliable email parsing"
-    }
-    return dashboard
-
-def main():
-    """Run the application."""
-    if "REPL_ID" in os.environ:
-        with open(".replit", "w") as f:
-            f.write("""
-run = "python replit_main.py"
-[nix]
-channel = "stable-22_11"
-[languages.python3]
-pattern = "**/*.py"
-            """)
-        if not os.path.exists("requirements.txt"):
-            with open("requirements.txt", "w") as f:
-                f.write("""
-fastapi uvicorn sqlmodel jinja2 python-multipart requests playwright openai
-                """)
-    
-    print("=" * 60)
-    print("AI ENGINE REPLIT DEMO")
-    print("=" * 60)
-    print("Starting web server...")
-    
-    uvicorn.run(app, host="0.0.0.0", port=8080)
-
-if __name__ == "__main__":
-    main()
+                            params = {
+                                action: 'scroll',
+                                direction: action.details.direction,
+                                amount

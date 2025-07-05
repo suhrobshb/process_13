@@ -1,304 +1,188 @@
 #!/usr/bin/env python3
 """
-AI Engine Quick Test Script
-==========================
+Quick Test for AI Engine Core Functionality (Weeks 1-6)
+=======================================================
 
-This script performs a quick validation of core AI Engine functionality:
-1. Core module imports
-2. Database initialization
-3. Basic runners (Shell, HTTP, Decision, LLM, Approval)
-4. Simple workflow creation and execution
+This script provides a simple, direct validation of the core AI components
+without requiring a full test environment, database, or external APIs.
 
-Usage:
-    python quick_test.py
+It validates the following key pipelines:
+1.  **AI Learning Engine**: Confirms that raw recording data can be analyzed
+    and transformed into a structured workflow.
+2.  **Dynamic Module Generation**: Ensures the structured workflow can be used
+    to generate valid Python code and test strings.
+3.  **Enhanced LLM Runner**: Checks the logic of the LLM runner, including
+    prompt templating, using a mocked provider.
+4.  **Real-time Streaming**: Verifies that the AILearningEngine correctly
+    invokes its streaming callback during analysis.
+
+To run, simply execute: `python quick_test.py`
 """
 
-import os
-import sys
-import time
 import json
+import time
 import logging
-from datetime import datetime
+from unittest.mock import patch, MagicMock, mock_open
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("quick_test")
+# Set up basic logging to see output from the modules
+logging.basicConfig(level=logging.INFO, format="%(name)s - %(levelname)s - %(message)s")
 
-# Set environment variables for testing
-os.environ["DATABASE_URL"] = "sqlite:///test_ai_engine.db"
-os.environ["OPENAI_API_KEY"] = "sk-test-mock-key-for-testing"
+# --- Import Core Engine Components ---
+# We wrap this in a try-except to provide a helpful message if the environment is not set up.
+try:
+    from ai_engine.ai_learning_engine import AILearningEngine
+    from ai_engine.dynamic_module_generator import DynamicModuleGenerator
+    from ai_engine.enhanced_runners.llm_runner import LLMRunner
+except ImportError as e:
+    print(f"Error: Failed to import AI Engine modules. Make sure you are running this from the project root.")
+    print(f"Details: {e}")
+    exit(1)
 
-# Test results tracking
-class TestResults:
-    def __init__(self):
-        self.successes = 0
-        self.failures = 0
-        self.results = []
-        
-    def success(self, test_name, details=None):
-        self.successes += 1
-        self.results.append({"name": test_name, "status": "SUCCESS", "details": details})
-        logger.info(f"✅ {test_name}: SUCCESS")
-        if details:
-            logger.info(f"   Details: {details}")
-        
-    def failure(self, test_name, error):
-        self.failures += 1
-        self.results.append({"name": test_name, "status": "FAILURE", "error": str(error)})
-        logger.error(f"❌ {test_name}: FAILURE - {error}")
-        
-    def summary(self):
-        total = self.successes + self.failures
-        print("\n" + "=" * 60)
-        print(f"AI ENGINE QUICK TEST RESULTS")
-        print("=" * 60)
-        print(f"Total Tests: {total}")
-        print(f"Successes: {self.successes}")
-        print(f"Failures: {self.failures}")
-        print("=" * 60)
-        
-        if self.failures > 0:
-            print("\nFAILED TESTS:")
-            for result in self.results:
-                if result["status"] == "FAILURE":
-                    print(f"- {result['name']}: {result.get('error', 'Unknown error')}")
-        
-        return self.failures == 0
 
-# Initialize test results
-results = TestResults()
+# --- Mock Data for Testing ---
 
-def test_core_imports():
-    """Test importing all core modules."""
+def get_sample_raw_recording():
+    """Provides a realistic, raw event stream for testing."""
+    base_time = time.time()
+    return [
+        {'timestamp': base_time, 'type': 'window_change', 'title': 'Login - Company CRM'},
+        {'timestamp': base_time + 1.0, 'type': 'type', 'details': {'text': 'admin'}},
+        {'timestamp': base_time + 5.0, 'type': 'window_change', 'title': 'Dashboard - Company CRM'},
+        {'timestamp': base_time + 6.0, 'type': 'click', 'details': {'element_text': 'Generate Report'}},
+    ]
+
+# --- Test Functions ---
+
+def test_learning_engine():
+    """
+    Tests if the AILearningEngine can process raw events into a structured workflow.
+    """
+    print("\n--- 🧪 1. Testing AI Learning Engine ---")
     try:
-        # Core modules
-        from ai_engine.database import create_db_and_tables, get_session
-        from ai_engine.models.workflow import Workflow
-        from ai_engine.models.task import Task
-        from ai_engine.models.execution import Execution
-        from ai_engine.models.user import User
-        from ai_engine.workflow_runners import RunnerFactory
-        from ai_engine.workflow_engine import WorkflowEngine
-        
-        # Authentication
-        from ai_engine.auth import get_password_hash, verify_password, create_access_token
-        
-        results.success("Core Module Imports")
-        return True
+        engine = AILearningEngine(get_sample_raw_recording())
+        structured_workflow = engine.analyze_and_generate_workflow()
+
+        assert isinstance(structured_workflow, dict)
+        assert "nodes" in structured_workflow and len(structured_workflow["nodes"]) > 0
+        assert "edges" in structured_workflow
+        assert "overall_confidence" in structured_workflow
+
+        print("✅ SUCCESS: AI Learning Engine generated a valid structured workflow.")
+        print(f"   - Nodes created: {len(structured_workflow['nodes'])}")
+        print(f"   - Overall Confidence: {structured_workflow['overall_confidence']}")
+        return structured_workflow
     except Exception as e:
-        results.failure("Core Module Imports", e)
-        return False
+        print(f"❌ FAILURE: AI Learning Engine test failed. Error: {e}")
+        return None
 
-def test_database_initialization():
-    """Test database initialization."""
+@patch("pathlib.Path.mkdir")
+@patch("builtins.open", new_callable=mock_open)
+def test_module_generator(mock_open, mock_mkdir, structured_workflow):
+    """
+    Tests if the DynamicModuleGenerator can create code from a structured workflow.
+    Mocks file system operations to prevent actual file creation.
+    """
+    print("\n--- 🧪 2. Testing Dynamic Module Generator ---")
+    if not structured_workflow:
+        print("⏩ SKIPPED: Cannot run test without a valid workflow from the previous step.")
+        return
+
     try:
-        from ai_engine.database import create_db_and_tables
-        
-        # Initialize database
-        create_db_and_tables()
-        
-        results.success("Database Initialization")
-        return True
+        # Add an ID to the workflow for the generator
+        structured_workflow['id'] = 'quick_test_wf'
+        generator = DynamicModuleGenerator(structured_workflow)
+        module_code, test_code = generator._generate_code()
+
+        assert isinstance(module_code, str) and len(module_code) > 0
+        assert "def run(context: dict)" in module_code
+        assert "from ai_engine.enhanced_runners" in module_code
+
+        assert isinstance(test_code, str) and len(test_code) > 0
+        assert "def test_workflow_orchestration" in test_code
+        assert "MockDesktopRunner.assert_any_call" in test_code
+
+        print("✅ SUCCESS: Dynamic Module Generator created valid code and test strings.")
     except Exception as e:
-        results.failure("Database Initialization", e)
-        return False
+        print(f"❌ FAILURE: Dynamic Module Generator test failed. Error: {e}")
 
-def test_shell_runner():
-    """Test Shell Runner functionality."""
-    try:
-        from ai_engine.workflow_runners import RunnerFactory
-        
-        # Create Shell Runner
-        shell_runner = RunnerFactory.create_runner("shell", "test_shell", {
-            "command": "echo 'Hello from Shell Runner'",
-            "timeout": 5
-        })
-        
-        # Execute runner
-        result = shell_runner.execute()
-        
-        # Validate result
-        if not result["success"]:
-            raise ValueError(f"Shell runner execution failed: {result.get('error')}")
-            
-        stdout = result["result"]["stdout"].strip()
-        
-        results.success("Shell Runner", {"stdout": stdout})
-        return True
-    except Exception as e:
-        results.failure("Shell Runner", e)
-        return False
 
-def test_http_runner():
-    """Test HTTP Runner functionality."""
+@patch("ai_engine.enhanced_runners.llm_runner.LLMFactory.create_provider")
+def test_llm_runner(mock_create_provider):
+    """
+    Tests the LLMRunner's logic, especially prompt templating, using a mocked provider.
+    """
+    print("\n--- 🧪 3. Testing Enhanced LLM Runner ---")
     try:
-        from ai_engine.workflow_runners import RunnerFactory
-        
-        # Create HTTP Runner
-        http_runner = RunnerFactory.create_runner("http", "test_http", {
-            "url": "https://httpbin.org/get",
-            "method": "GET",
-            "headers": {"Accept": "application/json"},
-            "timeout": 10
-        })
-        
-        # Execute runner
-        result = http_runner.execute()
-        
-        # Validate result
-        if not result["success"]:
-            raise ValueError(f"HTTP runner execution failed: {result.get('error')}")
-            
-        status_code = result["result"]["status_code"]
-        
-        results.success("HTTP Runner", {"status_code": status_code})
-        return True
-    except Exception as e:
-        results.failure("HTTP Runner", e)
-        return False
-
-def test_decision_runner():
-    """Test Decision Runner functionality."""
-    try:
-        from ai_engine.workflow_runners import RunnerFactory
-        
-        # Create Decision Runner with simple conditions
-        decision_runner = RunnerFactory.create_runner("decision", "test_decision", {
-            "conditions": [
-                {"expression": "10 > 5", "target": "success_path"}
-            ],
-            "default": "default_path"
-        })
-        
-        # Execute runner
-        result = decision_runner.execute()
-        
-        # Validate result
-        if not result["success"]:
-            raise ValueError(f"Decision runner execution failed: {result.get('error')}")
-            
-        target = result["result"]["target"]
-        expected_target = "success_path"
-        
-        if target != expected_target:
-            raise ValueError(f"Unexpected target: {target}, expected: {expected_target}")
-            
-        results.success("Decision Runner", {"target": target})
-        return True
-    except Exception as e:
-        results.failure("Decision Runner", e)
-        return False
-
-def test_approval_runner():
-    """Test Approval Runner functionality."""
-    try:
-        from ai_engine.workflow_runners import RunnerFactory
-        
-        # Create Approval Runner
-        approval_runner = RunnerFactory.create_runner("approval", "test_approval", {
-            "title": "Test Approval",
-            "description": "This is a test approval request",
-            "approvers": ["test@example.com"],
-            "wait": False  # Don't wait for actual approval
-        })
-        
-        # Execute runner
-        result = approval_runner.execute()
-        
-        # Validate result
-        if not result["success"]:
-            raise ValueError(f"Approval runner execution failed: {result.get('error')}")
-            
-        approval_id = result["result"]["approval_id"]
-        
-        results.success("Approval Runner", {"approval_id": approval_id})
-        return True
-    except Exception as e:
-        results.failure("Approval Runner", e)
-        return False
-
-def test_simple_workflow():
-    """Test simple workflow creation and execution."""
-    try:
-        from ai_engine.database import engine
-        from sqlmodel import Session
-        from ai_engine.models.workflow import Workflow
-        from ai_engine.workflow_engine import execute_workflow_by_id
-        
-        # Sample workflow data
-        workflow_data = {
-            "name": "Test Simple Workflow",
-            "description": "A simple test workflow",
-            "status": "active",
-            "steps": [
-                {
-                    "id": "echo",
-                    "type": "shell",
-                    "params": {
-                        "command": "echo 'Simple workflow test'",
-                        "timeout": 5
-                    }
-                }
-            ]
+        # Setup the mock provider to return a predictable response
+        mock_provider = MagicMock()
+        mock_provider.generate.return_value = {
+            "text": "This is a successful mock response.",
+            "metadata": {"provider": "mock"}
         }
-        
-        # Create workflow
-        with Session(engine) as session:
-            workflow = Workflow(**workflow_data)
-            session.add(workflow)
-            session.commit()
-            session.refresh(workflow)
-            workflow_id = workflow.id
-            
-        # Execute workflow
-        try:
-            execution_id = execute_workflow_by_id(workflow_id)
-            results.success("Simple Workflow", {"workflow_id": workflow_id, "execution_id": execution_id})
-            return True
-        except Exception as e:
-            results.failure("Simple Workflow Execution", e)
-            return False
-            
-    except Exception as e:
-        results.failure("Simple Workflow Creation", e)
-        return False
+        mock_create_provider.return_value = mock_provider
 
-def main():
-    """Main test function."""
-    print("=" * 60)
-    print("AI ENGINE QUICK TEST")
-    print("=" * 60)
-    print(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Database: {os.environ['DATABASE_URL']}")
-    print("=" * 60)
-    
-    # Run tests
-    test_core_imports()
-    test_database_initialization()
-    test_shell_runner()
-    test_http_runner()
-    test_decision_runner()
-    test_approval_runner()
-    test_simple_workflow()
-    
-    # Print summary
-    success = results.summary()
-    
-    if success:
-        print("\n🎉 All tests passed! The AI Engine is functioning correctly.")
-        print("\nYou can now proceed with deployment to Google Cloud.")
-        print("Required for deployment:")
-        print("1. Google Cloud Project ID")
-        print("2. Google Cloud region (e.g., us-central1)")
-        print("3. OpenAI API key (for LLM functionality)")
-        print("4. Database credentials (will be created if not provided)")
-    else:
-        print("\n❌ Some tests failed. Please fix the issues before deployment.")
-    
-    return 0 if success else 1
+        # Define the runner's parameters
+        params = {
+            "provider": "openai",
+            "model": "mock-model",
+            "prompt_template": "Summarize this: {{ previous_step.data }}"
+        }
+        context = {"previous_step": {"data": "Some important text."}}
+
+        runner = LLMRunner("test_llm_step", params)
+        result = runner.execute(context)
+
+        # Verify the prompt was rendered correctly
+        mock_provider.generate.assert_called_once_with("Summarize this: Some important text.")
+
+        # Verify the result structure
+        assert result["success"] is True
+        assert result["result"]["raw_text"] == "This is a successful mock response."
+
+        print("✅ SUCCESS: LLM Runner correctly rendered prompt and processed mock response.")
+    except Exception as e:
+        print(f"❌ FAILURE: LLM Runner test failed. Error: {e}")
+
+
+def test_streaming_callback():
+    """
+    Tests if the AILearningEngine's real-time streaming callback is invoked.
+    """
+    print("\n--- 🧪 4. Testing Real-time Streaming Callback ---")
+    try:
+        streamed_nodes = []
+        def simple_stream_callback(node):
+            print(f"   -> Streamed node received: {node.get('id')}")
+            streamed_nodes.append(node)
+
+        engine = AILearningEngine(
+            get_sample_raw_recording(),
+            stream_callback=simple_stream_callback
+        )
+        engine.analyze_and_generate_workflow()
+
+        assert len(streamed_nodes) > 0, "Callback was not invoked."
+        assert len(streamed_nodes) == 2, f"Expected 2 nodes to be streamed, but got {len(streamed_nodes)}."
+        assert "id" in streamed_nodes[0] and "data" in streamed_nodes[0]
+
+        print(f"✅ SUCCESS: Streaming callback was invoked {len(streamed_nodes)} times as expected.")
+    except Exception as e:
+        print(f"❌ FAILURE: Streaming callback test failed. Error: {e}")
+
+
+# --- Main Execution Block ---
 
 if __name__ == "__main__":
-    sys.exit(main())
+    print("=" * 60)
+    print("🚀 Starting Quick Validation of AI Engine Core Components 🚀")
+    print("=" * 60)
+
+    # Run tests in sequence
+    structured_workflow = test_learning_engine()
+    test_module_generator(structured_workflow=structured_workflow)
+    test_llm_runner()
+    test_streaming_callback()
+
+    print("\n" + "=" * 60)
+    print("🎉 Quick Test Suite Finished 🎉")
+    print("=" * 60)

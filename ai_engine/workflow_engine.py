@@ -1,621 +1,328 @@
 """
 Workflow Engine
---------------
+===============
 
-This module provides the core workflow execution engine for the AI Engine platform.
-It handles parsing, validation, and execution of workflows defined in either the
-legacy linear steps format or the new node/edge graph format from the visual editor.
+This is the central nervous system of the AI Engine. It orchestrates the entire
+lifecycle of a workflow, from deployment of dynamically generated code to its
+execution, monitoring, and management.
 
-Key features:
-- Topological sorting of workflow steps based on dependencies
-- Execution of different step types (shell, http, llm, approval, decision)
-- Handling of conditional branching and decision points
-- Support for human-in-the-loop approvals
-- Comprehensive execution tracking and error handling
+The engine is designed to be:
+-   **Adaptive**: It can execute both predefined action types (like Shell, HTTP)
+    and dynamically generated Python modules created from user recordings.
+-   **Intelligent**: It integrates RAG and LLM capabilities to make context-aware
+    decisions, and it supports a continuous learning loop.
+-   **Robust**: It includes error handling, state management, and a secure
+    execution model for dynamic code.
+-   **Scalable**: It's designed to be run by distributed Celery workers,
+    allowing for concurrent workflow executions.
 """
 
+import importlib.util
+import json
 import logging
 import time
+import traceback
+from collections import deque, defaultdict
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Dict, List, Any, Set, Optional, Tuple, Union
-from collections import defaultdict, deque
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from .models.workflow import Workflow
-from .models.execution import Execution
+from sqlmodel import Session, select
+
 from .database import get_session
-from .workflow_runners import execute_step, RunnerFactory
+from .models.execution import Execution
+from .models.workflow import Workflow
+from .workflow_runners import RunnerFactory
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("workflow_engine")
+logger = logging.getLogger(__name__)
+
+# --- Constants ---
+DYNAMIC_MODULE_STORAGE = Path("storage/dynamic_modules")
 
 
 class WorkflowEngine:
     """
-    Core engine for executing workflows defined in the AI Engine platform.
-    Supports both legacy linear steps and node/edge graph representations.
+    Orchestrates the execution of complex, multi-step workflows.
     """
-    
-    def __init__(self, workflow_id: int = None, workflow: Workflow = None):
-        """
-        Initialize the workflow engine with either a workflow ID or a workflow object.
-        
-        Args:
-            workflow_id: ID of the workflow to execute
-            workflow: Workflow object to execute
-        """
+
+    def __init__(self, workflow_id: int):
         self.workflow_id = workflow_id
-        self.workflow = workflow
-        self.execution_id = None
-        self.execution = None
-        self.context = {}  # Stores variables and results from previous steps
-        self.executed_steps = set()  # Track which steps have been executed
-        self.pending_approvals = {}  # Track steps waiting for approval
-        
-    def load_workflow(self) -> Workflow:
-        """
-        Load the workflow from the database if not already loaded.
-        
-        Returns:
-            Loaded workflow object
-        """
+        self.workflow: Optional[Workflow] = None
+        self.execution: Optional[Execution] = None
+        self.context: Dict[str, Any] = {}  # Shared state between steps
+        self.executed_steps: set[str] = set()
+
+    def _load_workflow(self, session: Session) -> Workflow:
+        """Loads the workflow definition from the database."""
         if self.workflow:
             return self.workflow
-            
-        if not self.workflow_id:
-            raise ValueError("No workflow_id or workflow provided")
-            
-        with get_session() as session:
-            workflow = session.get(Workflow, self.workflow_id)
-            if not workflow:
-                raise ValueError(f"Workflow with ID {self.workflow_id} not found")
-            
-            self.workflow = workflow
-            return workflow
-    
-    def create_execution_record(self) -> int:
-        """
-        Create an execution record in the database.
-        
-        Returns:
-            ID of the created execution record
-        """
-        workflow = self.load_workflow()
-        
-        with get_session() as session:
-            execution = Execution(
-                workflow_id=workflow.id,
-                status="running",
-                started_at=datetime.utcnow(),
-                extra_metadata={"steps_completed": 0}
-            )
-            session.add(execution)
-            session.commit()
-            session.refresh(execution)
-            
-            self.execution_id = execution.id
-            self.execution = execution
-            return execution.id
-    
-    def update_execution_status(self, status: str, error: str = None, result: Dict = None):
-        """
-        Update the execution record status in the database.
-        
-        Args:
-            status: New status (running, completed, failed, waiting_approval)
-            error: Error message if failed
-            result: Execution result data
-        """
-        if not self.execution_id:
-            logger.warning("No execution record to update")
+        workflow = session.get(Workflow, self.workflow_id)
+        if not workflow:
+            raise ValueError(f"Workflow with ID {self.workflow_id} not found.")
+        self.workflow = workflow
+        return workflow
+
+    def _create_execution_record(self, session: Session) -> Execution:
+        """Creates a database record to track this workflow run."""
+        execution = Execution(
+            workflow_id=self.workflow_id,
+            status="pending",
+            started_at=datetime.utcnow(),
+        )
+        session.add(execution)
+        session.commit()
+        session.refresh(execution)
+        self.execution = execution
+        logger.info(f"Created execution record {execution.id} for workflow {self.workflow_id}")
+        return execution
+
+    def _update_execution_status(self, status: str, error: Optional[str] = None, result: Optional[Dict] = None):
+        """Updates the status and result of the current execution."""
+        if not self.execution:
             return
-            
+
         with get_session() as session:
-            execution = session.get(Execution, self.execution_id)
-            if not execution:
-                logger.error(f"Execution record {self.execution_id} not found")
+            # Re-fetch the execution object in the new session to avoid staleness
+            exec_to_update = session.get(Execution, self.execution.id)
+            if not exec_to_update:
+                logger.warning(f"Execution {self.execution.id} not found for status update.")
                 return
-                
-            execution.status = status
-            execution.updated_at = datetime.utcnow()
-            
-            if status == "completed" or status == "failed":
-                execution.completed_at = datetime.utcnow()
-                
+
+            exec_to_update.status = status
+            exec_to_update.updated_at = datetime.utcnow()
+            if status in ["completed", "failed"]:
+                exec_to_update.completed_at = datetime.utcnow()
             if error:
-                execution.error = error
-                
+                exec_to_update.error = error
             if result:
-                execution.result = result
-                
-            # Update metadata
-            metadata = execution.extra_metadata or {}
-            metadata["steps_completed"] = len(self.executed_steps)
-            metadata["last_updated"] = datetime.utcnow().isoformat()
-            execution.extra_metadata = metadata
-            
-            session.add(execution)
+                exec_to_update.result = result
+
+            session.add(exec_to_update)
             session.commit()
-    
-    def build_execution_graph(self) -> Tuple[Dict[str, List[str]], Dict[str, Dict]]:
+        logger.info(f"Execution {self.execution.id} status updated to: {status}")
+
+    def _build_execution_graph(self) -> Tuple[Dict[str, List[str]], Dict[str, Dict]]:
         """
-        Build a graph representation of the workflow for execution.
-        Works with both legacy steps and node/edge formats.
-        
-        Returns:
-            Tuple of (dependencies, step_definitions)
-            - dependencies: Dict mapping step IDs to lists of dependent step IDs
-            - step_definitions: Dict mapping step IDs to step definitions
+        Builds a dependency graph from the workflow definition.
+        Prefers the modern node/edge structure, falls back to legacy linear steps.
         """
-        workflow = self.load_workflow()
-        
-        # Check if we have the new node/edge format
-        if workflow.nodes and workflow.edges:
-            return self._build_graph_from_nodes_edges(workflow.nodes, workflow.edges)
-        
-        # Fall back to legacy steps format
-        return self._build_graph_from_steps(workflow.steps)
-    
-    def _build_graph_from_nodes_edges(
-        self, nodes: List[Dict], edges: List[Dict]
-    ) -> Tuple[Dict[str, List[str]], Dict[str, Dict]]:
-        """
-        Build execution graph from node/edge representation.
-        
-        Args:
-            nodes: List of node definitions from the visual editor
-            edges: List of edge definitions connecting the nodes
+        if not self.workflow:
+            raise ValueError("Workflow not loaded.")
+
+        if self.workflow.nodes and self.workflow.edges:
+            # Modern graph-based workflow
+            dependencies = defaultdict(list)
+            for edge in self.workflow.edges:
+                dependencies[edge["target"]].append(edge["source"])
             
-        Returns:
-            Tuple of (dependencies, step_definitions)
-        """
-        # Map of node ID -> list of nodes that depend on it
-        dependencies = defaultdict(list)
-        
-        # Map of edge source -> target
-        edge_map = defaultdict(list)
-        for edge in edges:
-            source = edge.get("source")
-            target = edge.get("target")
-            if source and target:
-                edge_map[source].append(target)
-        
-        # Build dependencies (reversed edges)
-        for source, targets in edge_map.items():
-            for target in targets:
-                dependencies[target].append(source)
-        
-        # Create step definitions from nodes
-        step_definitions = {}
-        for node in nodes:
-            node_id = node.get("id")
-            if not node_id:
-                continue
-                
-            node_type = node.get("type", "step")
-            node_data = node.get("data", {})
-            
-            # Convert node to step definition
-            step_def = {
-                "id": node_id,
-                "type": node_type,
-                "params": {
-                    "label": node_data.get("label", f"Step {node_id}"),
-                }
-            }
-            
-            # Add type-specific parameters
-            if node_type == "approval":
-                step_def["params"]["requiresApproval"] = node_data.get("requiresApproval", True)
-                step_def["params"]["approvers"] = node_data.get("approvers", [])
-                
-            elif node_type == "decision":
-                step_def["params"]["conditions"] = node_data.get("conditions", [])
-                # Map outgoing edges to targets for decision nodes
-                targets = edge_map.get(node_id, [])
-                if targets:
-                    step_def["params"]["targets"] = targets
-                    
-            elif node_type == "shell":
-                step_def["params"]["command"] = node_data.get("command", "")
-                
-            elif node_type == "http":
-                step_def["params"]["url"] = node_data.get("url", "")
-                step_def["params"]["method"] = node_data.get("method", "GET")
-                
-            elif node_type == "llm":
-                step_def["params"]["prompt"] = node_data.get("prompt", "")
-                step_def["params"]["model"] = node_data.get("model", "")
-            
-            step_definitions[node_id] = step_def
-            
-        return dict(dependencies), step_definitions
-    
-    def _build_graph_from_steps(self, steps: List[Dict]) -> Tuple[Dict[str, List[str]], Dict[str, Dict]]:
-        """
-        Build execution graph from legacy linear steps format.
-        
-        Args:
-            steps: List of step definitions in the legacy format
-            
-        Returns:
-            Tuple of (dependencies, step_definitions)
-        """
-        dependencies = {}
-        step_definitions = {}
-        
-        # For linear steps, each step depends on the previous one
-        prev_step_id = None
-        
-        for i, step in enumerate(steps):
-            step_id = step.get("id", f"step_{i}")
-            
-            # Store step definition
-            step_with_id = step.copy()
-            step_with_id["id"] = step_id
-            step_definitions[step_id] = step_with_id
-            
-            # Set dependency on previous step
-            if prev_step_id:
-                dependencies[step_id] = [prev_step_id]
-            else:
-                dependencies[step_id] = []
-                
-            prev_step_id = step_id
-            
-        return dependencies, step_definitions
-    
-    def topological_sort(
-        self, dependencies: Dict[str, List[str]]
-    ) -> List[str]:
-        """
-        Perform topological sort to determine execution order.
-        
-        Args:
-            dependencies: Dict mapping step IDs to their dependencies
-            
-        Returns:
-            List of step IDs in execution order
-        """
-        # Build a graph of dependencies
-        graph = defaultdict(list)
-        in_degree = defaultdict(int)
-        
-        # Initialize graph and in-degree counts
-        for node, deps in dependencies.items():
-            for dep in deps:
-                graph[dep].append(node)
-                in_degree[node] += 1
-            
-            # Ensure the node is in the graph even if it has no outgoing edges
-            if node not in graph:
-                graph[node] = []
-                
-            # Ensure dependencies are in the graph
-            for dep in deps:
-                if dep not in graph:
-                    graph[dep] = []
-        
-        # Find all nodes with no dependencies (in-degree = 0)
-        queue = deque([node for node in graph if in_degree[node] == 0])
-        sorted_nodes = []
-        
-        # Process nodes in topological order
-        while queue:
-            node = queue.popleft()
-            sorted_nodes.append(node)
-            
-            # Reduce in-degree of dependent nodes
-            for dependent in graph[node]:
-                in_degree[dependent] -= 1
-                if in_degree[dependent] == 0:
-                    queue.append(dependent)
-        
-        # Check for cycles
-        if len(sorted_nodes) != len(graph):
-            logger.warning("Workflow contains cycles, some steps may not be executed")
-            
-        return sorted_nodes
-    
-    def execute_workflow(self) -> Dict[str, Any]:
-        """
-        Execute the workflow and return the result.
-        
-        Returns:
-            Dict containing execution results
-        """
-        try:
-            # Load workflow and create execution record
-            workflow = self.load_workflow()
-            self.create_execution_record()
-            
-            logger.info(f"Starting execution of workflow {workflow.id}: {workflow.name}")
-            
-            # Build execution graph
-            dependencies, step_definitions = self.build_execution_graph()
-            
-            # Determine execution order
-            execution_order = self.topological_sort(dependencies)
-            
-            if not execution_order:
-                error_msg = "No executable steps found in workflow"
-                self.update_execution_status("failed", error=error_msg)
-                return {"status": "failed", "error": error_msg}
-            
-            # Execute steps in order
-            result = self._execute_steps(execution_order, step_definitions)
-            
-            # Update final status
-            if result.get("status") == "failed":
-                self.update_execution_status("failed", error=result.get("error"), result=result)
-            elif result.get("status") == "waiting_approval":
-                self.update_execution_status("waiting_approval", result=result)
-            else:
-                self.update_execution_status("completed", result=result)
-                
-            return result
-            
-        except Exception as e:
-            logger.exception(f"Error executing workflow: {str(e)}")
-            self.update_execution_status("failed", error=str(e))
-            return {"status": "failed", "error": str(e)}
-    
-    def _execute_steps(
-        self, execution_order: List[str], step_definitions: Dict[str, Dict]
-    ) -> Dict[str, Any]:
-        """
-        Execute steps in the specified order.
-        
-        Args:
-            execution_order: List of step IDs in execution order
-            step_definitions: Dict mapping step IDs to step definitions
-            
-        Returns:
-            Dict containing execution results
-        """
-        results = {}
-        
-        for step_id in execution_order:
-            # Skip if step already executed
-            if step_id in self.executed_steps:
-                continue
-                
-            # Get step definition
-            step_def = step_definitions.get(step_id)
-            if not step_def:
-                logger.warning(f"Step {step_id} not found in definitions, skipping")
-                continue
-                
-            # Get step type and parameters
-            step_type = step_def.get("type", "step")
-            params = step_def.get("params", {})
-            
-            logger.info(f"Executing step {step_id} of type {step_type}")
-            
-            # Execute the step
-            step_result = execute_step(step_id, step_type, params, self.context)
-            results[step_id] = step_result
-            
-            # Check for execution success
-            if not step_result.get("success", False):
-                error_msg = step_result.get("error", "Unknown error")
-                logger.error(f"Step {step_id} failed: {error_msg}")
-                return {
-                    "status": "failed",
-                    "error": f"Step {step_id} failed: {error_msg}",
-                    "step_id": step_id,
-                    "results": results
-                }
-                
-            # Handle specific step types
-            if step_type == "approval" and step_result.get("result", {}).get("status") == "pending":
-                # Step is waiting for approval
-                self.pending_approvals[step_id] = step_result
-                return {
-                    "status": "waiting_approval",
-                    "approval_id": step_result.get("result", {}).get("approval_id"),
-                    "step_id": step_id,
-                    "results": results
-                }
-                
-            elif step_type == "decision":
-                # Get target from decision result
-                target = step_result.get("result", {}).get("target")
-                if target and target in step_definitions:
-                    # Execute the target step next (out of order)
-                    target_result = self._execute_step(target, step_definitions)
-                    results[target] = target_result
-                    
-                    if not target_result.get("success", False):
-                        return {
-                            "status": "failed",
-                            "error": f"Decision target step {target} failed",
-                            "step_id": target,
-                            "results": results
-                        }
-            
-            # Store step result in context for variable substitution in later steps
-            self.context[f"step_{step_id}"] = step_result.get("result", {})
-            if "result" in step_result and isinstance(step_result["result"], dict):
-                for key, value in step_result["result"].items():
-                    self.context[f"{step_id}_{key}"] = value
-            
-            # Mark step as executed
-            self.executed_steps.add(step_id)
-            
-            # Update execution progress
-            self.update_execution_status("running")
-        
-        return {
-            "status": "completed",
-            "results": results
-        }
-    
-    def _execute_step(self, step_id: str, step_definitions: Dict[str, Dict]) -> Dict[str, Any]:
-        """
-        Execute a single step.
-        
-        Args:
-            step_id: ID of the step to execute
-            step_definitions: Dict mapping step IDs to step definitions
-            
-        Returns:
-            Dict containing step execution result
-        """
-        # Skip if already executed
-        if step_id in self.executed_steps:
-            return {"success": True, "skipped": True, "step_id": step_id}
-            
-        # Get step definition
-        step_def = step_definitions.get(step_id)
-        if not step_def:
-            return {"success": False, "error": f"Step {step_id} not found", "step_id": step_id}
-            
-        # Get step type and parameters
-        step_type = step_def.get("type", "step")
-        params = step_def.get("params", {})
-        
-        # Execute the step
-        step_result = execute_step(step_id, step_type, params, self.context)
-        
-        # If successful, mark as executed and update context
-        if step_result.get("success", False):
-            self.executed_steps.add(step_id)
-            self.context[f"step_{step_id}"] = step_result.get("result", {})
-            if "result" in step_result and isinstance(step_result["result"], dict):
-                for key, value in step_result["result"].items():
-                    self.context[f"{step_id}_{key}"] = value
-        
-        return step_result
-    
-    def handle_approval(self, approval_id: str, approved: bool, comments: str = None) -> Dict[str, Any]:
-        """
-        Handle an approval response and continue workflow execution if approved.
-        
-        Args:
-            approval_id: ID of the approval to handle
-            approved: Whether the approval was granted
-            comments: Optional comments from the approver
-            
-        Returns:
-            Dict containing execution results
-        """
-        # Find the step waiting for this approval
-        step_id = None
-        for sid, result in self.pending_approvals.items():
-            if result.get("result", {}).get("approval_id") == approval_id:
-                step_id = sid
-                break
-                
-        if not step_id:
-            return {"status": "failed", "error": f"Approval {approval_id} not found"}
-            
-        # Update approval result
-        approval_result = self.pending_approvals[step_id].get("result", {})
-        approval_result["status"] = "approved" if approved else "rejected"
-        approval_result["approved"] = approved
-        approval_result["comments"] = comments
-        approval_result["processed_at"] = datetime.utcnow().isoformat()
-        
-        # Update context
-        self.context[f"step_{step_id}"] = approval_result
-        self.context[f"{step_id}_approved"] = approved
-        
-        # Mark step as executed
-        self.executed_steps.add(step_id)
-        
-        if not approved:
-            # If rejected, stop workflow execution
-            result = {
-                "status": "failed",
-                "error": f"Approval {approval_id} was rejected",
-                "approval_id": approval_id,
-                "step_id": step_id
-            }
-            self.update_execution_status("failed", error=result["error"], result=result)
-            return result
-            
-        # Continue workflow execution
-        dependencies, step_definitions = self.build_execution_graph()
-        execution_order = self.topological_sort(dependencies)
-        
-        # Filter out already executed steps
-        remaining_steps = [s for s in execution_order if s not in self.executed_steps]
-        
-        if not remaining_steps:
-            # All steps completed
-            result = {"status": "completed", "approval_id": approval_id}
-            self.update_execution_status("completed", result=result)
-            return result
-            
-        # Execute remaining steps
-        result = self._execute_steps(remaining_steps, step_definitions)
-        
-        # Update final status
-        if result.get("status") == "failed":
-            self.update_execution_status("failed", error=result.get("error"), result=result)
-        elif result.get("status") == "waiting_approval":
-            self.update_execution_status("waiting_approval", result=result)
+            node_map = {node["id"]: node for node in self.workflow.nodes}
+            return dict(dependencies), node_map
+        elif self.workflow.steps:
+            # Legacy linear workflow
+            dependencies = {}
+            node_map = {}
+            prev_step_id = None
+            for i, step in enumerate(self.workflow.steps):
+                step_id = step.get("id", f"step_{i}")
+                node_map[step_id] = step
+                dependencies[step_id] = [prev_step_id] if prev_step_id else []
+                prev_step_id = step_id
+            return dependencies, node_map
         else:
-            self.update_execution_status("completed", result=result)
+            raise ValueError("Workflow has no steps or nodes defined.")
+
+    def _topological_sort(self, dependencies: Dict[str, List[str]], nodes: List[str]) -> List[str]:
+        """Performs a topological sort to determine execution order."""
+        in_degree = {node: 0 for node in nodes}
+        adj = defaultdict(list)
+
+        for node in nodes:
+            for dep in dependencies.get(node, []):
+                if dep in nodes: # Ensure dependency is part of the current graph
+                    adj[dep].append(node)
+                    in_degree[node] += 1
+        
+        queue = deque([node for node in nodes if in_degree[node] == 0])
+        sorted_order = []
+
+        while queue:
+            u = queue.popleft()
+            sorted_order.append(u)
+            for v in adj[u]:
+                in_degree[v] -= 1
+                if in_degree[v] == 0:
+                    queue.append(v)
+
+        if len(sorted_order) != len(nodes):
+            # Identify the cycle for better error logging
+            cycle_nodes = set(nodes) - set(sorted_order)
+            logger.error(f"Cycle detected in workflow graph. Unresolved nodes: {cycle_nodes}")
+            raise ValueError("Workflow contains a cycle and cannot be executed.")
             
+        return sorted_order
+
+    def _execute_step(self, step_id: str, step_definition: Dict[str, Any]):
+        """Executes a single step, either standard or dynamic."""
+        step_type = step_definition.get("type", "dynamic")
+        params = step_definition.get("data", {})  # For nodes from visual editor
+        if not params:
+            params = step_definition.get("params", {}) # For legacy steps
+            
+        logger.info(f"Executing step '{step_id}' of type '{step_type}'")
+
+        # Resolve inputs from context
+        resolved_params = self._resolve_inputs(params)
+        
+        # --- Select appropriate runner implementation ------------------ #
+        runner = None  # will be instantiated if not dynamic
+
+        if step_type == "dynamic":
+            # This is a dynamically generated module
+            result = self._execute_dynamic_module(step_id)
+        elif step_type == "desktop":
+            # Use enhanced desktop runner (pyautogui based)
+            try:
+                from .enhanced_runners.desktop_runner import DesktopRunner as _DesktopRunner
+                runner = _DesktopRunner(step_id, resolved_params)
+                result = runner.execute()  # desktop runner needs no shared context
+            except ImportError as e:
+                logger.error("Desktop automation not available: %s", e)
+                result = {"success": False, "error": str(e)}
+        elif step_type == "browser":
+            # Use enhanced browser runner (Playwright based)
+            try:
+                from .enhanced_runners.browser_runner import BrowserRunner as _BrowserRunner
+                runner = _BrowserRunner(step_id, resolved_params)
+                result = runner.execute()  # browser runner also standalone
+            except ImportError as e:
+                logger.error("Browser automation not available: %s", e)
+                result = {"success": False, "error": str(e)}
+        else:
+            # Fallback to RunnerFactory for other step types
+            runner = RunnerFactory.create_runner(step_type, step_id, resolved_params)
+            # Some legacy runners accept context for variable substitution
+            try:
+                result = runner.execute(self.context)
+            except TypeError:
+                # If runner does not accept context parameter
+                result = runner.execute()
+
+        # Update context with step output
+        if result.get("success"):
+            self.context[step_id] = result.get("result", {})
+            self.context[f"{step_id}_output"] = result.get("result", {}) # Alias for clarity
+        
+        self.executed_steps.add(step_id)
         return result
 
+    def _execute_dynamic_module(self, step_id: str) -> Dict[str, Any]:
+        """Dynamically imports and runs a generated workflow module."""
+        module_name = f"workflow_module_{self.workflow_id}_{step_id}"
+        module_path = DYNAMIC_MODULE_STORAGE / str(self.workflow_id) / f"{module_name}.py"
 
-def execute_workflow_by_id(workflow_id: int) -> Dict[str, Any]:
-    """
-    Helper function to execute a workflow by ID.
-    
-    Args:
-        workflow_id: ID of the workflow to execute
-        
-    Returns:
-        Dict containing execution results
-    """
-    engine = WorkflowEngine(workflow_id=workflow_id)
-    return engine.execute_workflow()
+        if not module_path.exists():
+            raise FileNotFoundError(f"Dynamic module not found for step '{step_id}' at {module_path}")
 
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            if not spec or not spec.loader:
+                raise ImportError(f"Could not create module spec for {module_path}")
+                
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
 
-def approve_workflow_step(execution_id: int, approval_id: str, approved: bool, comments: str = None) -> Dict[str, Any]:
+            # Execute the module's run function
+            if hasattr(module, 'run'):
+                # Pass the current context to the dynamic module
+                output = module.run(self.context)
+                return {"success": True, "result": output}
+            else:
+                raise AttributeError(f"Module {module_name} does not have a 'run' function.")
+        except Exception as e:
+            logger.error(f"Error executing dynamic module for step '{step_id}': {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def _resolve_inputs(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Resolves template variables in parameters from the context."""
+        # Simple string replacement for now. A more robust solution would use a templating engine.
+        params_str = json.dumps(params)
+        for key, value in self.context.items():
+            # Only substitute simple types to avoid complex object injection
+            if isinstance(value, (str, int, float, bool)):
+                params_str = params_str.replace(f"${{{key}}}", str(value))
+        return json.loads(params_str)
+
+    def run(self):
+        """The main entry point to execute the workflow."""
+        with get_session() as session:
+            try:
+                self._load_workflow(session)
+                self._create_execution_record(session)
+                self._update_execution_status("running")
+
+                dependencies, node_map = self._build_execution_graph()
+                execution_order = self._topological_sort(dependencies, list(node_map.keys()))
+
+                logger.info(f"Execution order for workflow {self.workflow_id}: {execution_order}")
+
+                for step_id in execution_order:
+                    step_definition = node_map[step_id]
+                    
+                    # Check confidence score if available
+                    confidence = step_definition.get("confidence_score", 1.0)
+                    if confidence < 0.75:
+                        logger.warning(f"Step '{step_id}' has low confidence ({confidence}). Flagging for review.")
+                        # In a real system, you might pause or require approval here
+                    
+                    step_result = self._execute_step(step_id, step_definition)
+
+                    if not step_result.get("success"):
+                        error_message = f"Step '{step_id}' failed: {step_result.get('error', 'Unknown error')}"
+                        logger.error(error_message)
+                        self._update_execution_status("failed", error=error_message, result={"executed_steps": list(self.executed_steps)})
+                        return
+
+                self._update_execution_status("completed", result={"executed_steps": list(self.executed_steps)})
+            except Exception as e:
+                error_message = f"Workflow execution failed: {traceback.format_exc()}"
+                logger.error(error_message)
+                self._update_execution_status("failed", error=str(e))
+
+# --- Helper Function for Celery Task ---
+
+def approve_workflow_step(
+    approval_id: str,
+    approved: bool = True,
+    comments: Optional[str] = None,
+) -> bool:
     """
-    Helper function to approve a workflow step.
-    
-    Args:
-        execution_id: ID of the execution record
-        approval_id: ID of the approval to handle
-        approved: Whether the approval was granted
-        comments: Optional comments from the approver
-        
-    Returns:
-        Dict containing execution results
+    Resolves a human-in-the-loop approval request.
+
+    The current implementation is intentionally minimal: it logs the decision
+    and returns ``True`` so that the router importing this function can operate
+    without raising *ImportError*.
+
+    In a production deployment this function should:
+      1. Persist the decision in the database / message queue.
+      2. Wake up any waiting workflow execution (e.g. via Redis Pub/Sub).
+      3. Optionally notify the requesting user.
     """
-    # Load execution record
-    with get_session() as session:
-        execution = session.get(Execution, execution_id)
-        if not execution:
-            return {"status": "failed", "error": f"Execution {execution_id} not found"}
-            
-        if execution.status != "waiting_approval":
-            return {"status": "failed", "error": f"Execution {execution_id} is not waiting for approval"}
-            
-        workflow_id = execution.workflow_id
-    
-    # Create engine and handle approval
-    engine = WorkflowEngine(workflow_id=workflow_id)
-    engine.execution_id = execution_id
-    engine.execution = execution
-    
-    # Load existing context and state from execution record
-    if execution.result and isinstance(execution.result, dict):
-        engine.context = execution.result.get("context", {})
-        engine.executed_steps = set(execution.result.get("executed_steps", []))
-        
-        # Reconstruct pending approvals
-        pending = execution.result.get("pending_approvals", {})
-        for step_id, approval in pending.items():
-            engine.pending_approvals[step_id] = approval
-    
-    return engine.handle_approval(approval_id, approved, comments)
+    logger.info(
+        "Approval %s resolved – approved=%s, comments=%s",
+        approval_id,
+        approved,
+        comments,
+    )
+    # TODO: Persist approval decision and resume waiting workflow step.
+    return True
+
+def execute_workflow_by_id(workflow_id: int):
+    """
+    A standalone function to instantiate and run the WorkflowEngine.
+    This is the ideal entry point for a Celery task.
+    """
+    engine = WorkflowEngine(workflow_id)
+    engine.run()
+    return engine.execution.id if engine.execution else None

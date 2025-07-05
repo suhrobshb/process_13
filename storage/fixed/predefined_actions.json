@@ -206,29 +206,35 @@
           }
         },
         {
-          "id": "llm_translate_text",
-          "name": "Translate Text",
-          "description": "Translate text from one language to another",
+          "id": "llm_chat_completion",
+          "name": "Chat Completion (Structured JSON)",
+          "description": "Use an LLM to generate a structured JSON response based on a prompt",
           "type": "llm",
           "params": {
             "provider": "openai",
-            "model": "gpt-4",
-            "prompt": "Translate the following text from ${source_language} to ${target_language}:\n\n${text_to_translate}\n\nProvide only the translation without explanations.",
-            "temperature": 0.3,
-            "max_tokens": 1000
+            "model": "gpt-4o-mini",
+            "prompt": [
+              { "role": "system", "content": "You are a data extraction assistant that returns JSON." },
+              { "role": "user", "content": "Extract name and email from the following text:\n${input_text}" }
+            ],
+            "temperature": 0.1,
+            "max_tokens": 150,
+            "response_format": "json_object"
           }
         },
         {
-          "id": "llm_code_review",
-          "name": "Code Review",
-          "description": "Review code for issues and suggest improvements",
+          "id": "llm_context_aware_query",
+          "name": "Context-Aware Query (RAG)",
+          "description": "Ask a question against your documents for a context-aware answer.",
           "type": "llm",
           "params": {
             "provider": "openai",
             "model": "gpt-4",
-            "prompt": "Review the following ${language} code for bugs, security issues, and potential improvements:\n\n```${language}\n${code}\n```\n\nProvide specific feedback with line numbers where applicable.",
-            "temperature": 0.2,
-            "max_tokens": 1000
+            "prompt": "Based on the provided context, what were the key findings of the Q2 2025 financial report?",
+            "rag_params": {
+              "query": "key findings of Q2 2025 financial report",
+              "data_source_ids": ["${report_source_id}"]
+            }
           }
         }
       ]
@@ -278,47 +284,26 @@
             ],
             "default": "unknown_status_path"
           }
-        },
+        }
+      ]
+    },
+    "rag_decision": {
+      "title": "AI-Powered Decisions (RAG)",
+      "description": "Make intelligent decisions using context from your documents.",
+      "actions": [
         {
-          "id": "decision_data_validation",
-          "name": "Data Validation",
-          "description": "Validate data and choose path based on validity",
-          "type": "decision",
+          "id": "rag_decision_risk_assessment",
+          "name": "AI Risk Assessment",
+          "description": "Assess risk from documents and decide on a path.",
+          "type": "rag_decision",
           "params": {
-            "conditions": [
-              {
-                "expression": "'${email}' and '@' in '${email}' and '.' in '${email}'.split('@')[1]",
-                "target": "valid_email_path"
-              },
-              {
-                "expression": "len('${phone}') >= 10 and '${phone}'.replace('+', '').replace('-', '').replace(' ', '').isdigit()",
-                "target": "valid_phone_path"
-              }
-            ],
-            "default": "invalid_data_path"
-          }
-        },
-        {
-          "id": "decision_threshold_check",
-          "name": "Threshold Check",
-          "description": "Check if values exceed thresholds and trigger appropriate paths",
-          "type": "decision",
-          "params": {
-            "conditions": [
-              {
-                "expression": "${cpu_usage} > 90 or ${memory_usage} > 90",
-                "target": "critical_alert_path"
-              },
-              {
-                "expression": "${cpu_usage} > 75 or ${memory_usage} > 75",
-                "target": "warning_alert_path"
-              },
-              {
-                "expression": "${cpu_usage} > 50 or ${memory_usage} > 50",
-                "target": "notice_alert_path"
-              }
-            ],
-            "default": "normal_operation_path"
+            "query": "Based on the attached financial report, is this project high-risk, medium-risk, or low-risk?",
+            "data_source_ids": ["${report_source_id}"],
+            "outcomes": ["high_risk", "medium_risk", "low_risk"],
+            "llm_params": {
+              "provider": "openai",
+              "model": "gpt-4o-mini"
+            }
           }
         }
       ]
@@ -342,21 +327,6 @@
           }
         },
         {
-          "id": "approval_multi_approver",
-          "name": "Multi-Approver Workflow",
-          "description": "Request approval from multiple users",
-          "type": "approval",
-          "params": {
-            "title": "${approval_title:-Multi-Approver Workflow}",
-            "description": "This action requires approval from multiple users before proceeding.",
-            "approvers": ["${approver1_email}", "${approver2_email}", "${approver3_email}"],
-            "required_approvals": 2,
-            "timeout_hours": 48,
-            "notification_method": "email",
-            "wait": true
-          }
-        },
-        {
           "id": "approval_deployment",
           "name": "Deployment Approval",
           "description": "Request approval for a deployment",
@@ -370,41 +340,9 @@
             "notification_method": "slack",
             "wait": true
           }
-        },
-        {
-          "id": "approval_expenditure",
-          "name": "Expenditure Approval",
-          "description": "Request approval for a financial expenditure",
-          "type": "approval",
-          "params": {
-            "title": "Expenditure Approval: $${amount}",
-            "description": "Please review and approve the expenditure of $${amount} for ${purpose}.\n\nRequested by: ${requester_name}\nDepartment: ${department}\nJustification: ${justification}",
-            "approvers": ["${finance_manager_email}"],
-            "timeout_hours": 72,
-            "notification_method": "email",
-            "wait": true
-          }
-        },
-        {
-          "id": "approval_async",
-          "name": "Asynchronous Approval",
-          "description": "Create an approval request but don't wait for completion",
-          "type": "approval",
-          "params": {
-            "title": "Approval Required: ${title}",
-            "description": "${description}",
-            "approvers": ["${approver_email}"],
-            "timeout_hours": 168,
-            "notification_method": "email",
-            "wait": false
-          }
         }
       ]
     },
-
-    /* ------------------------------------------------------------------
-       NEW CATEGORY – Desktop Automation (PyAutoGUI)
-       ------------------------------------------------------------------ */
     "desktop": {
       "title": "Desktop Automation",
       "description": "Actions for automating desktop interactions with PyAutoGUI",
@@ -439,10 +377,6 @@
         }
       ]
     },
-
-    /* ------------------------------------------------------------------
-       NEW CATEGORY – Browser Automation (Playwright)
-       ------------------------------------------------------------------ */
     "browser": {
       "title": "Browser Automation",
       "description": "Actions for automating browsers using Playwright",
@@ -464,33 +398,6 @@
               { "type": "screenshot", "filename": "after_login.png" }
             ],
             "timeout": 90
-          }
-        }
-      ]
-    },
-
-    /* ------------------------------------------------------------------
-       ENHANCED LLM ACTION – Chat Completion with JSON mode
-       ------------------------------------------------------------------ */
-    "llm": {
-      "title": "Language Model Actions",
-      "description": "Actions for text generation and processing using language models",
-      "actions": [
-        {
-          "id": "llm_chat_completion",
-          "name": "Chat Completion (Structured JSON)",
-          "description": "Use an LLM to generate a structured JSON response based on a prompt",
-          "type": "llm",
-          "params": {
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "prompt": [
-              { "role": "system", "content": "You are a data extraction assistant that returns JSON." },
-              { "role": "user", "content": "Extract name and email from the following text:\\n${input_text}" }
-            ],
-            "temperature": 0.1,
-            "max_tokens": 150,
-            "response_format": "json_object"
           }
         }
       ]
