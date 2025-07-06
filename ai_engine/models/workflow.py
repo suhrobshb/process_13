@@ -36,10 +36,37 @@ class Workflow(SQLModel, table=True):
     # ------------------------------------------------------------------ #
 
     # Legacy linear steps (kept for compatibility)
-    steps: List[Dict] = Field(
+    # ------------------------------------------------------------------ #
+    # Input-Process-Output (IPO) aware step definition
+    # ------------------------------------------------------------------ #
+
+    class StepIPO(SQLModel):
+        """
+        Explicit Input-Process-Output definition for a single workflow step.
+
+        This nested model is *serialised as JSON* in the database to maintain
+        backward-compatibility while providing clear semantics for each stage
+        of a step.
+
+        - ``input``    : description of required inputs (files, variables, etc.)
+        - ``process`` : the action configuration (runner type, parameters, LLM prompt)
+        - ``output``  : description / schema of the expected result
+        - ``metadata``: free-form extras (confidence score, tags, etc.)
+        """
+
+        id: str
+        name: str
+        input: Dict = Field(default_factory=dict)
+        process: Dict = Field(default_factory=dict)
+        output: Dict = Field(default_factory=dict)
+        metadata: Dict = Field(default_factory=dict)
+
+    # Legacy linear steps now upgraded to explicit IPO structure but still
+    # stored as JSON for seamless DB migration.
+    steps: List[StepIPO] = Field(
         default_factory=list,
         sa_type=JSON,
-        description="Ordered list of step dictionaries for linear workflows.",
+        description="Ordered list of steps (Input-Process-Output aware).",
     )
 
     # Visual-editor graph representation

@@ -1,0 +1,60 @@
+# Kubernetes Horizontal Pod Autoscaler (HPA) for the AI Engine API
+#
+# This configuration automatically scales the number of backend API pods
+# based on observed CPU and memory utilization. This ensures that the
+# platform can handle varying loads efficiently while optimizing resource costs.
+#
+# It requires the Kubernetes Metrics Server to be installed in the cluster.
+#
+# To apply this configuration:
+# kubectl apply -f infrastructure/k8s/hpa.yaml
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  # The name of the Horizontal Pod Autoscaler resource.
+  name: ai-engine-api-hpa
+  # The namespace where the HPA and its target deployment reside.
+  # Change this if you are using a different namespace.
+  namespace: default
+spec:
+  # A reference to the workload that should be scaled (e.g., a Deployment).
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    # This must match the name of the backend API Deployment.
+    name: ai-engine-api
+  
+  # The minimum number of replicas to maintain, even during low traffic.
+  # Setting this to at least 2 ensures high availability.
+  minReplicas: 2
+  
+  # The maximum number of replicas the HPA can scale up to.
+  # This prevents runaway scaling and controls maximum cost.
+  maxReplicas: 10
+  
+  # The metrics used to determine when to scale.
+  # The HPA will scale up if *any* of these metrics exceed their target.
+  # It will only scale down when *all* metrics are below their target.
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        # The target value for the metric.
+        target:
+          type: Utilization
+          # Target average CPU utilization across all pods.
+          # A lower value like 50% leads to more aggressive scaling, which is
+          # often desirable for CPU-intensive AI/ML workloads to ensure responsiveness.
+          averageUtilization: 50
+          
+    - type: Resource
+      resource:
+        name: memory
+        # The target value for the metric.
+        target:
+          type: Utilization
+          # Target average memory utilization across all pods.
+          # A higher value is often acceptable for memory, as it's less prone to
+          # sudden spikes compared to CPU.
+          averageUtilization: 80
