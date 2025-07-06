@@ -139,6 +139,9 @@ def find_on_screen(
             f"Element from template '{template_path.name}' not found on screen with a confidence of >= {threshold}."
         )
 
+# --------------------------------------------------------------------------- #
+# Utility: wait_for_element
+# --------------------------------------------------------------------------- #
 
 def wait_for_element(
     template_path: Union[str, Path],
@@ -267,10 +270,9 @@ if __name__ == "__main__":
     print("\n2. Testing 'wait_for_element' (will succeed immediately)...")
     # In a real scenario, the element might not be present at first.
     # Here, we mock it by using the pre-existing screenshot.
-    with open("pyautogui_screenshot.png", "wb") as f:
-        f.write(open(screenshot_path, "rb").read())
-    
-    pyautogui.screenshot = lambda: pyautogui.Image.open("pyautogui_screenshot.png") # Mock pyautogui
+    # We need to mock pyautogui.screenshot to return our dummy image for the test
+    original_screenshot = pyautogui.screenshot
+    pyautogui.screenshot = lambda: cv2.cvtColor(dummy_screen, cv2.COLOR_BGR2RGB)
     
     try:
         x, y, conf = wait_for_element(template_path, timeout=2)
@@ -278,13 +280,13 @@ if __name__ == "__main__":
     except ElementNotFoundError as e:
         print(f"   ❌ FAILURE: {e}")
     finally:
-        Path("pyautogui_screenshot.png").unlink()
+        pyautogui.screenshot = original_screenshot # Restore original function
         
     # --- Demo 3: OCR from a specific region ---
     print("\n3. Testing 'ocr_from_region'...")
     try:
         # The region where we drew the text "Submit"
-        text = ocr_from_region(300, 250, 100, 30, screenshot=loaded_screenshot)
+        text = ocr_from_region(300, 250, 100, 30, screenshot=dummy_screen)
         if "Submit" in text:
             print(f"   ✅ SUCCESS: OCR correctly extracted text: '{text}'")
         else:
@@ -296,4 +298,3 @@ if __name__ == "__main__":
     import shutil
     shutil.rmtree(test_assets_dir)
     print(f"\nCleaned up dummy assets directory.")
-```

@@ -1,5 +1,5 @@
 import yaml
-from typing import Any
+from typing import Any, Dict
 
 class ScenarioExecutor:
     """

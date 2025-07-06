@@ -26,6 +26,12 @@ import json
 import time
 import logging
 from unittest.mock import MagicMock, patch
+import sys
+
+# --- Additional imports required for demo execution ---
+from ai_engine.models.execution import Execution
+from sqlmodel import create_engine as create_sql_engine
+from sqlalchemy.pool import StaticPool
 
 # --- Setup Environment for Demo ---
 # Use a temporary SQLite database for this demo run

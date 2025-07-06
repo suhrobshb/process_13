@@ -4,6 +4,8 @@ import time
 import pytest
 from unittest.mock import MagicMock, patch, call
 from pathlib import Path
+from sqlmodel import select  # needed for queries in workflow engine tests
+from ai_engine.models.execution import Execution  # ensure Execution type is available
 
 # Assume a testing environment where a display might not be available.
 # We will mock the GUI libraries.

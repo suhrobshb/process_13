@@ -235,5 +235,3 @@ if __name__ == "__main__":
             print(f"   - Performed: {suggestion['frequency']} times")
             print(f"   - Est. Total Time Spent: {suggestion['estimated_time_saved_str']}")
             print(f"   - Action Sequence: {suggestion['workflow_pattern']}")
-
-```
