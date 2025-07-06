@@ -148,6 +148,7 @@ async def _call_llm_for_workflow_structure(prompt: str) -> Optional[List[Dict[st
     A helper function to call the LLM, parse its response, and validate it.
     """
     logger.info("Calling LLM to generate/modify workflow structure...")
+    raw_text = ""
     try:
         # For this complex task, we might prefer a more powerful model.
         # This could be configured via environment variables.
@@ -201,8 +202,6 @@ async def nlu_to_workflow(text: str) -> Optional[List[Dict[str, Any]]]:
         A list of step dictionaries in the validated IPO format, or None on failure.
     """
     logger.info(f"Attempting to convert text to workflow: '{text[:100]}...'")
-    # The system prompt is prepended by the LLMRunner logic, here we just pass the user part.
-    # However, for clarity, we'll construct the full prompt here.
     full_prompt = f"{CREATE_WORKFLOW_SYSTEM_PROMPT}\n\nUser Request: \"{text}\""
     return await _call_llm_for_workflow_structure(full_prompt)
 
@@ -272,4 +271,3 @@ if __name__ == "__main__":
 
     # Run the async demo
     asyncio.run(demo())
-

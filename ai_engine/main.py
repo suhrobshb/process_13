@@ -26,24 +26,14 @@ from .routers import (
 )
 from .routers.auth_router import router as auth_router
 from .scenario_library import router as library_router
-from .routers.llm_router import router as llm_router   # NEW
-from .routers.real_time_router import (               # NEW
-    router as realtime_router,
-)  # WebSocket endpoint for live recording/analysis
-from .routers.recording_router import (               # NEW
-    router as recording_router,
-)  # REST endpoint for sending raw recordings to the AI Learning Engine
-# --- Advanced-feature routers ------------------------------------------------ #
-from .routers.discovery_router import (               # NEW
-    router as discovery_router,
-)  # Smart Automation Discovery suggestions
-from .routers.chat_router import (                    # NEW
-    router as chat_router,
-)  # Natural-language workflow creation / modification
+from .routers.discovery_router import router as discovery_router  # NEW
+from .routers.chat_router import router as chat_router            # NEW
+from .routers.real_time_router import router as realtime_router   # NEW
+from .routers.recording_router import router as recording_router  # NEW
+from .routers.websocket_router import router as websocket_router  # NEW
 
 from .trigger_engine import TriggerEngine
 from .database import create_db_and_tables
-from .routers.websocket_router import router as websocket_router
 
 # --------------------------------------------------------------------------- #
 # Structured / audit logging configuration
@@ -184,18 +174,13 @@ app.include_router(workflow_router.router, prefix="/api")
 app.include_router(execution_router.router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(library_router, prefix="/api")
-# LLM operations (prompt testing, etc.)
-app.include_router(llm_router, prefix="/api")
-# Real-time streaming (WebSocket) routes
-app.include_router(websocket_router)
-# Live action/event streaming for Recording Studio (WebSocket `/ws/recording/{id}`)
-app.include_router(realtime_router)
-# Recording analysis endpoints (raw data -> AI Learning Engine)
-app.include_router(recording_router)
-# Smart automation discovery suggestions
+# Additional feature routers
 app.include_router(discovery_router, prefix="/api")
-# Natural-language chat interface for workflow creation / editing
 app.include_router(chat_router, prefix="/api")
+# Real-time & recording endpoints (declare their own prefixes)
+app.include_router(realtime_router)
+app.include_router(recording_router)
+app.include_router(websocket_router)
 
 # --------------------------------------------------------------------------- #
 # Misc utility endpoints
