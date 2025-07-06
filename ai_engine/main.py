@@ -26,11 +26,15 @@ from .routers import (
 )
 from .routers.auth_router import router as auth_router
 from .scenario_library import router as library_router
-from .routers.discovery_router import router as discovery_router  # NEW
-from .routers.chat_router import router as chat_router            # NEW
-from .routers.real_time_router import router as realtime_router   # NEW
-from .routers.recording_router import router as recording_router  # NEW
-from .routers.websocket_router import router as websocket_router  # NEW
+
+# --------------------------------------------------------------------------- #
+# Additional feature routers
+# --------------------------------------------------------------------------- #
+from .routers.discovery_router import router as discovery_router
+from .routers.chat_router import router as chat_router
+from .routers.real_time_router import router as realtime_router
+from .routers.recording_router import router as recording_router
+from .routers.websocket_router import router as websocket_router
 
 from .trigger_engine import TriggerEngine
 from .database import create_db_and_tables
@@ -174,10 +178,10 @@ app.include_router(workflow_router.router, prefix="/api")
 app.include_router(execution_router.router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(library_router, prefix="/api")
-# Additional feature routers
+# --- Advanced feature routers ------------------------------------------------ #
 app.include_router(discovery_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
-# Real-time & recording endpoints (declare their own prefixes)
+# Real-time streaming and recording endpoints declare their own prefixes
 app.include_router(realtime_router)
 app.include_router(recording_router)
 app.include_router(websocket_router)

@@ -13,12 +13,24 @@ if TYPE_CHECKING:
 
 class WorkflowVersion(SQLModel, table=True):
     """
-    Represents a specific, immutable snapshot of a workflow's configuration.
+    Represents a specific, immutable snapshot of a workflow's configuration,
+    providing comprehensive change tracking and rollback capabilities.
 
     This model is the foundation for collaboration, auditing, version control,
-    and rollback capabilities. Each time a user saves significant changes to a
+    and rollback functionalities. Each time a user saves significant changes to a
     workflow, a new WorkflowVersion record is created to capture that state in
     time, providing a complete history of its evolution.
+
+    Change Tracking:
+    Is achieved by comparing the `data` JSON blob between two different versions
+    of the same workflow. A "diff" can be generated to show exactly what changed
+    in the steps, nodes, or triggers.
+
+    Rollback Capability:
+    A "rollback" is a non-destructive operation. To roll back to a previous
+    version, the application should take the `data` from an older `WorkflowVersion`
+    record and use it to create a *new* version. This preserves the full,
+    unbroken history of the workflow while reverting its active state.
     """
     id: Optional[int] = Field(default=None, primary_key=True)
 
@@ -29,7 +41,7 @@ class WorkflowVersion(SQLModel, table=True):
         description="The ID of the parent Workflow this version belongs to."
     )
     # The back-populating relationship to the Workflow model.
-    # This assumes the Workflow model has a `versions: List["WorkflowVersion"]` field.
+    # This assumes the parent Workflow model has a `versions: List["WorkflowVersion"]` field.
     workflow: "Workflow" = Relationship(back_populates="versions")
 
     # --- Versioning & Branching Metadata ---
@@ -46,7 +58,7 @@ class WorkflowVersion(SQLModel, table=True):
         description="A user-provided comment describing the changes in this version, similar to a git commit message."
     )
 
-    # --- Workflow State Snapshot ---
+    # --- Workflow State Snapshot (Core of Change Tracking) ---
     data: Dict[str, Any] = Field(
         sa_column=Field(JSON),
         description="A complete JSON snapshot of the workflow's state (including steps, nodes, edges, and triggers) at the time of versioning. This data is used for diffing and rollbacks."
