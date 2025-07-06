@@ -20,6 +20,8 @@ Key Features:
     informed, context-aware decisions or summaries.
 -   **Error Handling & Configuration**: Robustly handles API errors and missing
     configurations (like API keys).
+-   **Metrics & Cost Tracking**: Integrates with the platform's monitoring system
+    to track request latency and token usage for performance and cost analysis.
 """
 
 import os
@@ -29,7 +31,10 @@ import time
 from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
 
-from jinja2 import Environment, FileSystemLoader, Template
+from jinja2 import Environment
+
+# Import metrics helpers for instrumentation
+from ..metrics_instrumentation import record_llm_request, record_llm_token_usage
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -139,43 +144,51 @@ class AnthropicProvider(BaseLLM):
             logger.error(f"Anthropic API request failed: {e}", exc_info=True)
             raise
 
-class LocalLLMProvider(BaseLLM):
-    """Provider for a local LLM served via an HTTP endpoint (e.g., Ollama)."""
+class OllamaProvider(BaseLLM):
+    """
+    Provider for open-source LLMs served locally via Ollama.
+    Supports models like Llama3, Mistral, etc.
+    """
 
     def __init__(self, model: str, **kwargs):
         super().__init__(model, **kwargs)
         try:
             import requests
         except ImportError:
-            raise ImportError("LocalLLMProvider requires 'pip install requests'.")
+            raise ImportError("OllamaProvider requires 'pip install requests'.")
         
-        self.endpoint = os.getenv("LOCAL_LLM_ENDPOINT")
+        self.endpoint = os.getenv("OLLAMA_API_ENDPOINT", "http://localhost:11434/api/generate")
         if not self.endpoint:
-            raise ValueError("LOCAL_LLM_ENDPOINT environment variable not set (e.g., 'http://localhost:11434/api/generate').")
+            raise ValueError("OLLAMA_API_ENDPOINT environment variable not set.")
         self.requests = requests
 
     def generate(self, prompt: str) -> Dict[str, Any]:
-        logger.info(f"Sending request to local LLM endpoint: {self.endpoint}")
+        logger.info(f"Sending request to Ollama endpoint: {self.endpoint} for model: {self.model}")
         payload = {
             "model": self.model,
             "prompt": prompt,
-            "stream": False, # Ensure we get a single response
+            "stream": False,  # Ensure we get a single, complete response
             **self.kwargs
         }
         try:
-            response = self.requests.post(self.endpoint, json=payload)
+            response = self.requests.post(self.endpoint, json=payload, timeout=120) # 2-minute timeout
             response.raise_for_status()
             data = response.json()
             return {
                 "text": data.get("response", ""),
                 "metadata": {
-                    "provider": "local",
+                    "provider": "ollama",
                     "model": self.model,
                     "response_time_ms": data.get("total_duration", 0) / 1_000_000,
+                    "token_usage": {
+                        "prompt_tokens": data.get("prompt_eval_count", 0),
+                        "completion_tokens": data.get("eval_count", 0),
+                        "total_tokens": data.get("prompt_eval_count", 0) + data.get("eval_count", 0),
+                    }
                 }
             }
         except self.requests.exceptions.RequestException as e:
-            logger.error(f"Local LLM request failed: {e}", exc_info=True)
+            logger.error(f"Ollama request failed: {e}", exc_info=True)
             raise
 
 # --- LLM Provider Factory ---
@@ -190,8 +203,8 @@ class LLMFactory:
             return OpenAIProvider(model, **kwargs)
         elif provider_name == "anthropic":
             return AnthropicProvider(model, **kwargs)
-        elif provider_name == "local":
-            return LocalLLMProvider(model, **kwargs)
+        elif provider_name == "ollama":
+            return OllamaProvider(model, **kwargs)
         else:
             raise ValueError(f"Unsupported LLM provider: '{provider_name}'")
 
@@ -209,10 +222,9 @@ class LLMRunner:
         Args:
             step_id (str): A unique identifier for this step.
             params (Dict[str, Any]): Parameters for the step, including:
-                - provider (str): The LLM provider (e.g., 'openai', 'local').
+                - provider (str): The LLM provider (e.g., 'openai', 'ollama').
                 - model (str): The specific model to use.
                 - prompt_template (str): A Jinja2 template for the prompt.
-                - input_variables (List[str]): Keys from the context to be used in the template.
                 - output_schema (Optional[Dict]): A JSON schema for structured output.
                 - llm_kwargs (Optional[Dict]): Additional keyword arguments for the LLM API call.
         """
@@ -249,7 +261,6 @@ class LLMRunner:
             parsed_json = json.loads(json_str)
             
             # Optional: Validate against a JSON schema if one is provided
-            # For simplicity, we'll just return the parsed object.
             # A library like `jsonschema` could be used here for validation.
             logger.info("Successfully parsed structured output.")
             return parsed_json
@@ -280,10 +291,22 @@ class LLMRunner:
 
             # 3. Generate the response
             response = provider.generate(rendered_prompt)
+            duration = time.time() - start_time
+            
             raw_text = response.get("text", "")
             metadata = response.get("metadata", {})
+            
+            # 4. Record metrics for performance and cost tracking
+            record_llm_request(self.provider_name, self.model, duration, 'success')
+            token_usage = metadata.get("token_usage", {})
+            if token_usage:
+                record_llm_token_usage(
+                    self.provider_name, self.model,
+                    token_usage.get("prompt_tokens", 0),
+                    token_usage.get("completion_tokens", 0)
+                )
 
-            # 4. Parse structured output if schema is provided
+            # 5. Parse structured output if schema is provided
             structured_output = self._parse_structured_output(raw_text)
 
             result = {
@@ -295,15 +318,18 @@ class LLMRunner:
             return {
                 "success": True,
                 "result": result,
-                "execution_time_seconds": time.time() - start_time,
+                "execution_time_seconds": duration,
             }
 
         except Exception as e:
+            duration = time.time() - start_time
             logger.error(f"LLM step '{self.step_id}' failed: {e}", exc_info=True)
+            # Record failed request metric
+            record_llm_request(self.provider_name, self.model, duration, 'failure')
             return {
                 "success": False,
                 "error": str(e),
-                "execution_time_seconds": time.time() - start_time,
+                "execution_time_seconds": duration,
             }
 
 # --- Example Usage ---
@@ -314,50 +340,67 @@ if __name__ == "__main__":
     
     logging.basicConfig(level=logging.INFO)
 
-    # 1. Define a workflow step with LLM parameters
-    llm_step_params = {
-        "provider": "openai",
-        "model": "gpt-3.5-turbo",
-        "prompt_template": "Summarize the following text in 50 words or less: {{ previous_step.output.text }}",
-        "llm_kwargs": {"temperature": 0.7}
-    }
-
-    # 2. Simulate a workflow context from a previous step
-    workflow_context = {
-        "previous_step": {
-            "output": {
-                "text": "The Industrial Revolution was the transition to new manufacturing processes in Europe and the United States, in the period from about 1760 to sometime between 1820 and 1840. This transition included going from hand production methods to machines, new chemical manufacturing and iron production processes, the increasing use of steam power, the development of machine tools and the rise of the factory system."
+    # --- Example 1: OpenAI with context ---
+    print("\n--- 1. OpenAI Runner Execution Example ---")
+    try:
+        llm_step_params = {
+            "provider": "openai",
+            "model": "gpt-3.5-turbo",
+            "prompt_template": "Summarize the following text in 50 words or less: {{ previous_step.output.text }}",
+            "llm_kwargs": {"temperature": 0.7}
+        }
+        workflow_context = {
+            "previous_step": {
+                "output": {
+                    "text": "The Industrial Revolution was the transition to new manufacturing processes in Europe and the United States, in the period from about 1760 to sometime between 1820 and 1840."
+                }
             }
         }
-    }
+        runner = LLMRunner(step_id="summarize_text_step", params=llm_step_params)
+        execution_result = runner.execute(context=workflow_context)
+        print(json.dumps(execution_result, indent=2))
+    except (ValueError, ImportError) as e:
+        print(f"Skipping OpenAI example: {e}")
 
-    # 3. Instantiate and execute the runner
-    runner = LLMRunner(step_id="summarize_text_step", params=llm_step_params)
-    execution_result = runner.execute(context=workflow_context)
-
-    # 4. Print the result
-    print("\n--- LLM Runner Execution Result ---")
-    print(json.dumps(execution_result, indent=2))
-
-    # --- Example with Structured Output ---
-    structured_step_params = {
-        "provider": "openai",
-        "model": "gpt-4-turbo",
-        "prompt_template": "Extract the name, email, and company from this text and provide it as a JSON object: 'Contact John Doe at john.doe@acme.com from Acme Inc.'",
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "email": {"type": "string"},
-                "company": {"type": "string"}
-            },
-            "required": ["name", "email", "company"]
+    # --- Example 2: Ollama with a local model ---
+    print("\n--- 2. Ollama (Local LLM) Execution Example ---")
+    try:
+        # NOTE: This requires an Ollama server running with the 'llama3' model pulled.
+        # e.g., `ollama run llama3`
+        ollama_params = {
+            "provider": "ollama",
+            "model": "llama3",
+            "prompt_template": "Why is the sky blue?",
         }
-    }
-    
-    structured_runner = LLMRunner(step_id="extract_data_step", params=structured_step_params)
-    structured_result = structured_runner.execute(context={}) # No context needed for this simple prompt
-    
-    print("\n--- Structured Output Result ---")
-    print(json.dumps(structured_result, indent=2))
+        ollama_runner = LLMRunner(step_id="local_qa_step", params=ollama_params)
+        ollama_result = ollama_runner.execute(context={})
+        print(json.dumps(ollama_result, indent=2))
+    except (ValueError, ImportError) as e:
+        print(f"Skipping Ollama example: {e}")
+    except Exception as e:
+        print(f"Ollama example failed. Is the Ollama server running? Error: {e}")
+
+
+    # --- Example 3: Structured Output with JSON ---
+    print("\n--- 3. Structured Output (JSON) Example ---")
+    try:
+        structured_step_params = {
+            "provider": "openai",
+            "model": "gpt-4-turbo",
+            "prompt_template": "Extract the name, email, and company from this text and provide it as a JSON object: 'Contact John Doe at john.doe@acme.com from Acme Inc.'",
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "email": {"type": "string"},
+                    "company": {"type": "string"}
+                },
+                "required": ["name", "email", "company"]
+            }
+        }
+        structured_runner = LLMRunner(step_id="extract_data_step", params=structured_step_params)
+        structured_result = structured_runner.execute(context={})
+        print(json.dumps(structured_result, indent=2))
+    except (ValueError, ImportError) as e:
+        print(f"Skipping structured output example: {e}")
 

@@ -95,7 +95,12 @@ class AILearningEngine:
         if not self.stream_callback:
             return
         try:
-            self.stream_callback(node)
+            # The event structure is important for the frontend to handle different real-time updates
+            event_to_stream = {
+                "event": "action_step_generated",
+                "payload": node
+            }
+            self.stream_callback(event_to_stream)
             logger.debug("Streamed node %s to client", node.get("id"))
         except Exception as exc:  # noqa: broad-except
             # Streaming errors should never break offline learning
@@ -236,16 +241,27 @@ class AILearningEngine:
             # Calculate confidence score
             confidence = self._calculate_confidence_score(cluster)
             
-            # For this phase, all generated actions are of type 'desktop'
-            # The engine will use the DesktopRunner to replay the raw events.
+            # Create the node using the new explicit IPO structure
             node = {
                 "id": node_id,
-                "type": "desktop", # This will be executed by the DesktopRunner
-                "data": {
-                    "label": title,
+                "name": title,
+                "input": {
+                    "source": "previous_step.output" if last_node_id else "manual_trigger",
+                    "description": f"Receives data from '{last_node_id}'." if last_node_id else "This is the first step, initiated by a trigger."
+                },
+                "process": {
+                    "type": "desktop",  # Default to desktop runner for replaying raw events
                     "description": description,
+                    "actions": cluster  # The raw events to be replayed
+                },
+                "output": {
+                    "variable": f"{node_id}_output",
+                    "description": f"The result of the '{title}' action."
+                },
+                "metadata": {
                     "confidence_score": round(confidence, 2),
-                    "raw_actions": cluster # The raw events to be replayed
+                    "ai_generated": True,
+                    "type": "desktop" # For the visual editor's node type
                 }
             }
             workflow_nodes.append(node)
@@ -263,13 +279,14 @@ class AILearningEngine:
 
             last_node_id = node_id
 
-        overall_confidence = sum(n['data']['confidence_score'] for n in workflow_nodes) / len(workflow_nodes) if workflow_nodes else 0
+        overall_confidence = sum(n['metadata']['confidence_score'] for n in workflow_nodes) / len(workflow_nodes) if workflow_nodes else 0
         
         final_workflow = {
             "name": f"Learned Workflow - {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             "description": f"Automatically generated from a recording. Business context: {self.business_context or 'Not provided'}",
             "overall_confidence": round(overall_confidence, 2),
-            "nodes": workflow_nodes,
+            "steps": workflow_nodes, # Using 'steps' to align with the IPO model
+            "nodes": [], # Keep these for visual editor if needed, but steps is primary
             "edges": workflow_edges
         }
         
@@ -299,7 +316,7 @@ if __name__ == "__main__":
     structured_workflow = learning_engine.analyze_and_generate_workflow()
     
     # Print the result
-    print("\n--- Generated Workflow Structure ---")
+    print("\n--- Generated Workflow Structure (with IPO) ---")
     print(json.dumps(structured_workflow, indent=2))
     
     print("\n--- Demo Complete ---")

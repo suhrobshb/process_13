@@ -13,8 +13,18 @@ import shutil
 from .task_detection import TaskDetection
 from .workflow_engine import execute_workflow_by_id
 
+# --------------------------------------------------------------------------- #
+# Metrics & Timing
+# --------------------------------------------------------------------------- #
+import time
+from .metrics_instrumentation import (
+    record_step_execution,
+    record_workflow_start,
+    record_workflow_end,
+)
+
 @celery_app.task
-def process_task(task_id: int):
+def process_task(self, task_id: int):
     """
     1. Mark as 'processing'
     2. Unzip the recording
@@ -23,6 +33,15 @@ def process_task(task_id: int):
     5. Update Task.extra_metadata with clusters
     6. Mark as 'completed'
     """
+    start_ts = time.time()
+    record_step_execution(  # metrics: mark step start
+        workflow_name="__recording_pipeline__",
+        step_name="process_task",
+        step_type="system",
+        duration_seconds=0,
+        status="started",
+    )
+
     with get_session() as session:
         task = session.get(Task, task_id)
         if not task:
@@ -64,16 +83,38 @@ def process_task(task_id: int):
             task.extra_metadata = {"error": str(e)}
             session.add(task)
             session.commit()
+            # Metrics – failure
+            record_step_execution(
+                workflow_name="__recording_pipeline__",
+                step_name="process_task",
+                step_type="system",
+                duration_seconds=time.time() - start_ts,
+                status="failed",
+            )
+            # Retry with exponential back-off, up to 3 attempts
+            raise self.retry(
+                exc=e,
+                countdown=2 ** self.request.retries * 60,
+                max_retries=3,
+            )
         else:
             # 6) complete
             task.status = "completed"
             session.add(task)
             session.commit()
+            # Metrics – success
+            record_step_execution(
+                workflow_name="__recording_pipeline__",
+                step_name="process_task",
+                step_type="system",
+                duration_seconds=time.time() - start_ts,
+                status="completed",
+            )
         finally:
             shutil.rmtree(extract_dir)
 
 @celery_app.task
-def execute_workflow(workflow_id: int):
+def execute_workflow(self, workflow_id: int):
     """
     Execute a workflow using the new WorkflowEngine.
 
@@ -81,7 +122,20 @@ def execute_workflow(workflow_id: int):
     handles creation of the Execution record, step dispatch, approvals,
     result collection, and status updates.
     """
-    return execute_workflow_by_id(workflow_id)
+    record_workflow_start(f"wf_{workflow_id}")
+    start = time.time()
+    try:
+        result = execute_workflow_by_id(workflow_id)
+        record_workflow_end(f"wf_{workflow_id}", time.time() - start, "completed")
+        return result
+    except Exception as e:
+        record_workflow_end(f"wf_{workflow_id}", time.time() - start, "failed")
+        # Retry with exponential back-off (1,2,4 minutes)
+        raise self.retry(
+            exc=e,
+            countdown=2 ** self.request.retries * 60,
+            max_retries=3,
+        )
 
 @celery_app.task
 def enqueue_scheduled_workflows():

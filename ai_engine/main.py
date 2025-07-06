@@ -30,6 +30,9 @@ from .routers.llm_router import router as llm_router   # NEW
 from .routers.real_time_router import (               # NEW
     router as realtime_router,
 )  # WebSocket endpoint for live recording/analysis
+from .routers.recording_router import (               # NEW
+    router as recording_router,
+)  # REST endpoint for sending raw recordings to the AI Learning Engine
 
 from .trigger_engine import TriggerEngine
 from .database import create_db_and_tables
@@ -180,6 +183,8 @@ app.include_router(llm_router, prefix="/api")
 app.include_router(websocket_router)
 # Live action/event streaming for Recording Studio (WebSocket `/ws/recording/{id}`)
 app.include_router(realtime_router)
+# Recording analysis endpoints (raw data -> AI Learning Engine)
+app.include_router(recording_router)
 
 # --------------------------------------------------------------------------- #
 # Misc utility endpoints

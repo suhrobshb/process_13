@@ -31,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { capitalize } from "@/lib/utils";
 import { apiClient } from "@/lib/api-client";
 import { useToast } from "@/components/ui/use-toast";
+import { useWebSocket } from "@/hooks/useWebSocket";
 
 // --- Mock Data for Local Event Simulation ---
 // This simulates the events captured by a local recording agent.
@@ -122,7 +123,6 @@ export default function RecordingPage() {
   
   const timerRef = useRef(null);
   const eventSimulatorRef = useRef(null);
-  const ws = useRef<WebSocket | null>(null);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -143,9 +143,35 @@ export default function RecordingPage() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (eventSimulatorRef.current) clearInterval(eventSimulatorRef.current);
-      if (ws.current) ws.current.close();
     };
   }, []);
+
+  /* ------------------------------------------------------------------ */
+  /* WebSocket – live updates while recording                           */
+  /* ------------------------------------------------------------------ */
+
+  const { lastMessage } = useWebSocket(
+    // Connect only while recording; disconnect when recording stops.
+    isRecording ? apiClient.getWebSocketUrl(clientId) : null,
+    {
+      onOpen: () =>
+        toast({
+          title: "Connected",
+          description: "Real-time analysis session started.",
+        }),
+      onError: () =>
+        toast({
+          title: "Connection Error",
+          variant: "destructive",
+        }),
+    }
+  );
+
+  // React to streaming messages
+  useEffect(() => {
+    if (lastMessage) handleWebSocketMessage(lastMessage as MessageEvent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastMessage]);
 
   const handleWebSocketMessage = (event: MessageEvent) => {
     try {
@@ -199,11 +225,11 @@ export default function RecordingPage() {
     setRecordingTime(0);
 
     // Setup WebSocket connection
-    ws.current = new WebSocket(apiClient.getWebSocketUrl(newClientId));
-    ws.current.onopen = () => toast({ title: "Connected", description: "Real-time analysis session started." });
-    ws.current.onmessage = handleWebSocketMessage;
-    ws.current.onerror = () => toast({ title: "Connection Error", variant: "destructive" });
-    ws.current.onclose = () => console.log("WebSocket disconnected.");
+    // The useWebSocket hook will pick up the new clientId via state change
+    toast({
+      title: "Recording",
+      description: "Live session initiated.",
+    });
 
     timerRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
 

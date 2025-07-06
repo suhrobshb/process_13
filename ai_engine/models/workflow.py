@@ -16,8 +16,11 @@ Additional sections:
 • ``approvals`` – human-in-the-loop approval requirements.  
 • ``extra_metadata`` – free-form JSON for future extensions.
 """
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional, List, Dict
+
 from sqlmodel import SQLModel, Field, JSON, Relationship
 
 class Workflow(SQLModel, table=True):
@@ -30,6 +33,29 @@ class Workflow(SQLModel, table=True):
     # Optional so programmatic tests / scripts can omit it.  In production this
     # should contain the username / service-account that created the workflow.
     created_by: Optional[str] = Field(default=None)
+
+    # ------------------------------------------------------------------ #
+    # Versioning / lineage
+    # ------------------------------------------------------------------ #
+
+    # Semantic version number – starts at 1 for the first saved workflow
+    version: int = Field(default=1, description="Monotonically increasing version number.")
+
+    # Self-referencing foreign-key for lineage / branching
+    parent_workflow_id: Optional[int] = Field(
+        default=None,
+        foreign_key="workflow.id",
+        description="If set, this workflow is a child version of `parent_workflow_id`.",
+    )
+    # Relationship helpers (lazy-loaded by SQLModel)
+    parent: Optional["Workflow"] = Relationship(back_populates="children", sa_relationship_kwargs={"lazy": "selectin"})
+    children: List["Workflow"] = Relationship(back_populates="parent", sa_relationship_kwargs={"lazy": "selectin"})
+
+    # Optional human description of what changed from the parent
+    version_notes: Optional[str] = Field(
+        default=None,
+        description="Optional notes describing the changes introduced in this version.",
+    )
 
     # ------------------------------------------------------------------ #
     # Representations
@@ -83,3 +109,43 @@ class Workflow(SQLModel, table=True):
     triggers: List[Dict] = Field(default=[], sa_type=JSON)
     approvals: List[Dict] = Field(default=[], sa_type=JSON)
     extra_metadata: Dict = Field(default={}, sa_type=JSON) 
+
+    # ------------------------------------------------------------------ #
+    # Helper utilities
+    # ------------------------------------------------------------------ #
+
+    @classmethod
+    def create_new_version(
+        cls,
+        original: "Workflow",
+        *,
+        updated_by: str,
+        version_notes: str | None = None,
+        **overrides,
+    ) -> "Workflow":
+        """
+        Produce a **new persisted copy** of ``original`` with an incremented
+        ``version`` number while preserving full history.
+
+        Typical usage pattern in a service layer:
+
+        ```python
+        new_wf = Workflow.create_new_version(
+            existing_wf,
+            updated_by=current_user.username,
+            version_notes="Added automatic PDF extraction step",
+            steps=modified_steps,
+        )
+        session.add(new_wf); session.commit()
+        ```
+        """
+        payload = original.model_dump(exclude={"id", "created_at", "updated_at"})
+        payload.update(overrides)
+
+        # Increment version & set lineage pointers
+        payload["version"] = original.version + 1
+        payload["parent_workflow_id"] = original.id
+        payload["created_by"] = updated_by
+        payload["version_notes"] = version_notes
+
+        return cls(**payload)
