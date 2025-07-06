@@ -39,6 +39,21 @@ except Exception:
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------- #
+# Vision-utility imports (image matching & OCR)
+# --------------------------------------------------------------------------- #
+try:
+    from ..automation_runners.vision_utils import (  # pylint: disable=import-error
+        find_on_screen,
+        wait_for_element as vision_wait_for_element,
+        ocr_from_region,
+        ElementNotFoundError,
+    )
+    VISION_AVAILABLE = True
+except Exception:  # pragma: no cover – vision utils optional in headless CI
+    VISION_AVAILABLE = False
+    ElementNotFoundError = RuntimeError  # fallback to generic error
+
 
 class DesktopRunner:
     """
@@ -225,6 +240,88 @@ class DesktopRunner:
                 duration = action.get('duration', 1.0)
                 time.sleep(duration)
                 result['details'] = f"Waited for {duration} seconds."
+
+            # ------------------------------------------------------------------
+            # VISION-BASED ACTIONS
+            # ------------------------------------------------------------------
+            elif action_type == "vision_click":
+                """
+                Locate an element on screen by template image & click its center.
+                Required:
+                    template   – path to the template file
+                Optional:
+                    threshold  – match confidence (default 0.8)
+                    wait_time  – seconds to wait before failing (default 10)
+                """
+                if not VISION_AVAILABLE:
+                    raise RuntimeError("Vision utilities not available in this environment.")
+
+                template = action.get("template")
+                if not template:
+                    raise ValueError("vision_click action requires 'template' path.")
+
+                threshold = action.get("threshold", 0.8)
+                wait_time = action.get("wait_time", 10)
+
+                # Wait for element, then click
+                x, y, conf = vision_wait_for_element(template, timeout=wait_time, threshold=threshold)
+                pyautogui.click(x, y)
+                result["details"] = f"Vision-click at ({x},{y}) with confidence {conf:.2f}."
+                result["output"] = {"x": x, "y": y, "confidence": conf}
+
+            elif action_type == "wait_for_element":
+                """
+                Wait until an image template appears on screen.
+                Params:
+                    template   – path to template file
+                    timeout    – seconds to wait (default 10)
+                    threshold  – confidence (default 0.8)
+                """
+                if not VISION_AVAILABLE:
+                    raise RuntimeError("Vision utilities not available in this environment.")
+                template = action.get("template")
+                if not template:
+                    raise ValueError("wait_for_element requires 'template' path.")
+
+                timeout = action.get("timeout", 10)
+                threshold = action.get("threshold", 0.8)
+                x, y, conf = vision_wait_for_element(template, timeout=timeout, threshold=threshold)
+                result["details"] = (
+                    f"Element '{template}' detected at ({x},{y}) after wait. Confidence {conf:.2f}"
+                )
+                result["output"] = {"x": x, "y": y, "confidence": conf}
+
+            elif action_type == "ocr_extract":
+                """
+                Extract text via OCR.
+                Two modes:
+                  1. Provide explicit region: left, top, width, height.
+                  2. Provide template image -> locate then OCR around it with padding.
+                """
+                if not VISION_AVAILABLE:
+                    raise RuntimeError("Vision utilities not available in this environment.")
+
+                # Mode 1: explicit region
+                if all(k in action for k in ("left", "top", "width", "height")):
+                    left = action["left"]
+                    top = action["top"]
+                    width = action["width"]
+                    height = action["height"]
+                # Mode 2: template
+                elif "template" in action:
+                    tpl = action["template"]
+                    pad = action.get("padding", 5)
+                    x, y, _ = vision_wait_for_element(tpl, timeout=action.get("timeout", 10))
+                    width = action.get("width", 120)
+                    height = action.get("height", 40)
+                    left = max(0, x - width // 2 - pad)
+                    top = max(0, y - height // 2 - pad)
+                else:
+                    raise ValueError("ocr_extract requires either region coords or a template.")
+
+                text = ocr_from_region(left, top, width, height)
+                result["details"] = f"OCR extracted text: '{text[:50]}'"
+                result["output"] = {"text": text}
 
             else:
                 raise ValueError(f"Unknown or unsupported action type: '{action_type}'")

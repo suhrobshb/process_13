@@ -1,21 +1,30 @@
 """
-Real-Time WebSocket Router
-==========================
+Comprehensive Real-Time WebSocket Router for AI Engine
+=======================================================
 
-This module provides the real-time communication layer for the AI Engine,
-enabling a live, interactive user experience during the recording and analysis
-process. It uses WebSockets to push events and AI-generated action steps
-to the frontend as they happen.
+This module provides a centralized, robust real-time communication layer for the
+AI Engine platform. It uses WebSockets to manage persistent, bidirectional
+connections with frontend clients, enabling a dynamic and interactive user
+experience.
 
-Key Features:
--   **Live Recording Feed**: Streams raw captured events (clicks, keystrokes)
-    to the UI for immediate user feedback.
--   **Real-time Action Box Generation**: Broadcasts structured "Action Step"
-    nodes as the AILearningEngine processes the recording, allowing users to
-    see their workflow being built in real-time.
--   **Connection Management**: A simple in-memory manager for handling WebSocket
-    clients. For production-scale deployments, this should be backed by a
-    more robust system like Redis Pub/Sub.
+Key Responsibilities:
+-   **Multi-Channel Connection Management**: A sophisticated ConnectionManager
+    handles multiple, distinct communication channels for different parts of the
+    application (e.g., live recording sessions, workflow execution monitoring,
+    and system-wide alerts).
+-   **Live Recording Studio Feed**: Streams raw captured events and AI-generated
+    "Action Step" nodes to the UI in real-time as a user records a process.
+-   **Real-time Workflow Execution Monitoring**: Pushes live status updates,
+    step completions, and results for running workflows, allowing users to
+    watch their automations execute.
+-   **System-Wide Event Broadcasting**: Provides a channel for broadcasting
+    global notifications, such as system maintenance alerts or major updates.
+-   **Scalable Architecture**: Designed with production in mind. The default
+    in-memory connection store can be easily swapped with a Redis Pub/Sub
+    backend to support a distributed, multi-worker environment.
+-   **Decoupled Broadcasting**: Provides simple async helper functions that other
+    modules (like the AILearningEngine or WorkflowEngine) can call to send
+    updates, without needing direct access to WebSocket objects.
 """
 
 import asyncio
@@ -27,112 +36,165 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Create router
-router = APIRouter(prefix="/ws", tags=["Real-Time"])
+# Define the router for all real-time WebSocket endpoints
+router = APIRouter(prefix="/ws", tags=["Real-Time Communication"])
 
-# --- Connection Manager ---
+# --- Centralized Connection Manager ---
 
 class ConnectionManager:
-    """Manages active WebSocket connections for real-time updates."""
+    """
+    Manages all active WebSocket connections across different channels.
 
+    In a production environment with multiple workers, this in-memory dictionary
+    should be replaced by a Redis Pub/Sub system to broadcast messages across
+    all server instances.
+    """
     def __init__(self):
-        # Maps a task_id to a list of active WebSocket connections for that task.
-        self.active_connections: Dict[int, List[WebSocket]] = {}
+        # A dictionary where keys are channel names (e.g., "recording:123")
+        # and values are lists of active WebSocket connections.
+        self.active_connections: Dict[str, List[WebSocket]] = {}
         logger.info("Real-time ConnectionManager initialized.")
 
-    async def connect(self, websocket: WebSocket, task_id: int):
-        """Accepts and stores a new WebSocket connection."""
+    async def connect(self, websocket: WebSocket, channel: str):
+        """Accepts and stores a new WebSocket connection for a specific channel."""
         await websocket.accept()
-        connections = self.active_connections.setdefault(task_id, [])
+        connections = self.active_connections.setdefault(channel, [])
         connections.append(websocket)
-        logger.info(f"Client connected to task_id {task_id}. Total connections for task: {len(connections)}")
+        logger.info(f"Client connected to channel '{channel}'. Total connections for channel: {len(connections)}")
 
-    def disconnect(self, websocket: WebSocket, task_id: int):
-        """Removes a WebSocket connection."""
-        if task_id in self.active_connections:
-            self.active_connections[task_id].remove(websocket)
-            if not self.active_connections[task_id]:
-                del self.active_connections[task_id]
-            logger.info(f"Client disconnected from task_id {task_id}.")
+    def disconnect(self, websocket: WebSocket, channel: str):
+        """Removes a WebSocket connection from a channel."""
+        if channel in self.active_connections:
+            try:
+                self.active_connections[channel].remove(websocket)
+                # If the channel has no more listeners, clean it up
+                if not self.active_connections[channel]:
+                    del self.active_connections[channel]
+                logger.info(f"Client disconnected from channel '{channel}'.")
+            except ValueError:
+                # This can happen if the connection is already removed, which is safe to ignore.
+                pass
 
-    async def broadcast_to_task(self, task_id: int, message: Dict[str, Any]):
-        """Broadcasts a message to all clients connected to a specific task."""
-        if task_id in self.active_connections:
-            for connection in self.active_connections[task_id]:
+    async def broadcast_to_channel(self, channel: str, message: Dict[str, Any]):
+        """Broadcasts a JSON message to all clients subscribed to a specific channel."""
+        if channel in self.active_connections:
+            # Create a list of connections to iterate over, in case of disconnections during broadcast
+            connections_to_send = list(self.active_connections[channel])
+            for connection in connections_to_send:
                 try:
                     await connection.send_json(message)
                 except Exception:
-                    # Handle cases where the connection might be closed unexpectedly
-                    self.disconnect(connection, task_id)
+                    # If sending fails, assume the connection is dead and remove it.
+                    self.disconnect(connection, channel)
+            logger.debug(f"Broadcasted message to {len(connections_to_send)} clients on channel '{channel}'.")
 
-# Instantiate the manager
+# --- Singleton Instance of the Manager ---
+# This global instance is shared across the application.
 manager = ConnectionManager()
 
-# --- WebSocket Endpoint ---
+# --- WebSocket Endpoints ---
 
 @router.websocket("/recording/{task_id}")
-async def websocket_recording(websocket: WebSocket, task_id: int):
+async def websocket_recording_session(websocket: WebSocket, task_id: int):
     """
-    WebSocket endpoint for a specific recording session.
+    WebSocket endpoint for a live recording session.
 
-    A frontend client connects to this endpoint to receive a live stream of
-    events and AI-generated action steps for the given `task_id`.
+    Clients connect here to receive a real-time stream of:
+    1. Raw captured events (clicks, types).
+    2. AI-generated "Action Step" nodes as the AILearningEngine processes the recording.
     """
-    await manager.connect(websocket, task_id)
+    channel = f"recording:{task_id}"
+    await manager.connect(websocket, channel)
     try:
         while True:
-            # This loop keeps the connection alive and demonstrates pushing data.
-            # In a real application, the push would be triggered by an external
-            # system (like a Celery worker finishing a task) calling
-            # `broadcast_event_to_frontend`.
-            event = await get_next_event(task_id)
-            await manager.broadcast_to_task(task_id, event)
+            # This loop keeps the connection alive. The server pushes messages;
+            # it doesn't expect to receive any from the client in this case.
+            # A timeout could be added here to close inactive connections.
+            await asyncio.sleep(60)
     except WebSocketDisconnect:
-        manager.disconnect(websocket, task_id)
+        manager.disconnect(websocket, channel)
     except Exception as e:
-        logger.error(f"Error in WebSocket for task {task_id}: {e}")
-        manager.disconnect(websocket, task_id)
+        logger.error(f"An error occurred in the recording WebSocket for task {task_id}: {e}")
+        manager.disconnect(websocket, channel)
 
-
-# --- Helper Function for Broadcasting (to be called by other modules) ---
-
-async def broadcast_event_to_frontend(task_id: int, event_data: Dict[str, Any]):
+@router.websocket("/execution/{execution_id}")
+async def websocket_execution_monitoring(websocket: WebSocket, execution_id: int):
     """
-    A helper function that other parts of the application (like the
-    AILearningEngine or a task processor) can call to send real-time
-    updates to the frontend.
+    WebSocket endpoint for monitoring a specific workflow execution in real-time.
+
+    Clients receive updates on:
+    - Overall execution status (running, completed, failed).
+    - Individual step status updates.
+    - Intermediate results or logs from steps.
     """
-    await manager.broadcast_to_task(task_id, event_data)
+    channel = f"execution:{execution_id}"
+    await manager.connect(websocket, channel)
+    try:
+        while True:
+            await asyncio.sleep(60)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, channel)
+    except Exception as e:
+        logger.error(f"An error occurred in the execution monitoring WebSocket for execution {execution_id}: {e}")
+        manager.disconnect(websocket, channel)
 
-
-# --- Stub for Demonstration ---
-
-async def get_next_event(task_id: int) -> Dict:
+@router.websocket("/system")
+async def websocket_system_events(websocket: WebSocket):
     """
-    Stub Function: In a real application, this logic would not live here.
-    Instead, a message queue consumer (e.g., a Celery task listening to Redis)
-    would call `broadcast_event_to_frontend`.
+    WebSocket endpoint for system-wide notifications and events.
 
-    This function is a placeholder to simulate receiving the next recording
-    event for a given task_id from a message queue or another source.
+    Clients connected here will receive global alerts, such as:
+    - System maintenance announcements.
+    - Major platform updates.
+    - Potentially, high-level administrative alerts.
     """
-    # Simulate a short delay as if waiting for a message from a queue
-    await asyncio.sleep(2.0)
-    
-    # Simulate a sample event for a new action step being generated
-    sample_event = {
-        "event": "action_step_generated",
-        "task_id": task_id,
-        "payload": {
-            "id": f"step_{int(asyncio.get_running_loop().time())}",
-            "name": "Click 'Submit' Button",
-            "input": {"source": "previous_step.output"},
-            "process": {
-                "type": "desktop",
-                "description": "The AI clicked on a button with the text 'Submit'.",
-                "actions": [{"type": "click", "x": 1024, "y": 800}]
-            },
-            "output": {"variable": "submit_confirmation"}
-        }
-    }
-    return sample_event
+    channel = "system"
+    await manager.connect(websocket, channel)
+    try:
+        while True:
+            await asyncio.sleep(60)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, channel)
+    except Exception as e:
+        logger.error(f"An error occurred in the system event WebSocket: {e}")
+        manager.disconnect(websocket, channel)
+
+
+# --- Public Helper Functions for Broadcasting ---
+# These async functions are the intended interface for other modules to send data
+# to the frontend without needing to know about the WebSocket implementation details.
+
+async def broadcast_recording_event(task_id: int, event_data: Dict[str, Any]):
+    """
+    Broadcasts an event related to a specific recording session.
+    Called by the AILearningEngine.
+
+    Args:
+        task_id: The ID of the recording task.
+        event_data: The JSON-serializable data to send.
+    """
+    channel = f"recording:{task_id}"
+    await manager.broadcast_to_channel(channel, event_data)
+
+async def broadcast_execution_update(execution_id: int, update_data: Dict[str, Any]):
+    """
+    Broadcasts a status update for a specific workflow execution.
+    Called by the WorkflowEngine or Celery tasks.
+
+    Args:
+        execution_id: The ID of the workflow execution.
+        update_data: The JSON-serializable data to send.
+    """
+    channel = f"execution:{execution_id}"
+    await manager.broadcast_to_channel(channel, update_data)
+
+async def broadcast_system_alert(alert_data: Dict[str, Any]):
+    """
+    Broadcasts a system-wide alert to all connected clients on the system channel.
+    Called by administrative or system-level services.
+
+    Args:
+        alert_data: The JSON-serializable alert data to send.
+    """
+    channel = "system"
+    await manager.broadcast_to_channel(channel, alert_data)

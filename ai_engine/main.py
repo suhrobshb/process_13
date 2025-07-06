@@ -33,6 +33,13 @@ from .routers.real_time_router import (               # NEW
 from .routers.recording_router import (               # NEW
     router as recording_router,
 )  # REST endpoint for sending raw recordings to the AI Learning Engine
+# --- Advanced-feature routers ------------------------------------------------ #
+from .routers.discovery_router import (               # NEW
+    router as discovery_router,
+)  # Smart Automation Discovery suggestions
+from .routers.chat_router import (                    # NEW
+    router as chat_router,
+)  # Natural-language workflow creation / modification
 
 from .trigger_engine import TriggerEngine
 from .database import create_db_and_tables
@@ -185,6 +192,10 @@ app.include_router(websocket_router)
 app.include_router(realtime_router)
 # Recording analysis endpoints (raw data -> AI Learning Engine)
 app.include_router(recording_router)
+# Smart automation discovery suggestions
+app.include_router(discovery_router, prefix="/api")
+# Natural-language chat interface for workflow creation / editing
+app.include_router(chat_router, prefix="/api")
 
 # --------------------------------------------------------------------------- #
 # Misc utility endpoints

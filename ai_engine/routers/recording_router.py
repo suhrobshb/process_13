@@ -27,7 +27,11 @@ from pydantic import BaseModel
 from ai_engine.auth import get_current_active_user
 from ai_engine.models.user import User
 from ai_engine.ai_learning_engine import AILearningEngine
-from ai_engine.routers.real_time_router import broadcast_event_to_frontend, manager as ws_manager
+# Import the channel-specific broadcaster for recording sessions
+from ai_engine.routers.real_time_router import (
+    broadcast_recording_event,
+    manager as ws_manager,
+)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -72,7 +76,7 @@ def run_analysis_and_stream(
             # Run the async broadcast function in a new event loop.
             # For production, a shared event loop managed by a separate thread
             # might be more efficient, but this is simpler and effective.
-            asyncio.run(broadcast_event_to_frontend(task_id, event_data))
+            asyncio.run(broadcast_recording_event(task_id, event_data))
         except Exception as e:
             logger.error(f"Error in stream callback for task {task_id}: {e}", exc_info=True)
 
@@ -94,7 +98,7 @@ def run_analysis_and_stream(
             "task_id": task_id,
             "payload": final_workflow
         }
-        asyncio.run(broadcast_event_to_frontend(task_id, final_event))
+        asyncio.run(broadcast_recording_event(task_id, final_event))
         
         logger.info(f"Analysis complete for task_id: {task_id}")
 
@@ -106,7 +110,7 @@ def run_analysis_and_stream(
             "task_id": task_id,
             "payload": {"error": str(e)}
         }
-        asyncio.run(broadcast_event_to_frontend(task_id, error_event))
+        asyncio.run(broadcast_recording_event(task_id, error_event))
 
 
 # --- API Endpoint to Trigger Analysis ---

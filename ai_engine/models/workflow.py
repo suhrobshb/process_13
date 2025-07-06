@@ -35,6 +35,26 @@ class Workflow(SQLModel, table=True):
     created_by: Optional[str] = Field(default=None)
 
     # ------------------------------------------------------------------ #
+    # Execution mode & preferences
+    # ------------------------------------------------------------------ #
+
+    # Determines where / how the workflow will run.
+    # • attended    – runs on the end-user’s workstation with live feedback  
+    # • unattended  – runs headless in the cloud / worker pool
+    mode: str = Field(
+        default="attended",
+        description="Execution mode: 'attended' (desktop-assisted) or 'unattended' (cloud/headless).",
+    )
+
+    # Optional, arbitrary preferences for the executor / orchestrator
+    # (e.g. queue name, priority, resource hints, parallelism).
+    execution_prefs: Dict = Field(
+        default_factory=dict,
+        sa_type=JSON,
+        description="Additional execution preferences (queue, priority, resources, etc.).",
+    )
+
+    # ------------------------------------------------------------------ #
     # Versioning / lineage
     # ------------------------------------------------------------------ #
 
