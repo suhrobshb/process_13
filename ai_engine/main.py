@@ -37,7 +37,8 @@ from .routers.recording_router import router as recording_router
 from .routers.websocket_router import router as websocket_router
 
 from .trigger_engine import TriggerEngine
-from .database import create_db_and_tables
+from .database import create_db_and_tables, health_check as db_health_check
+from .utils.env_validator import validate_environment, print_env_report
 
 # --------------------------------------------------------------------------- #
 # Structured / audit logging configuration
@@ -61,6 +62,9 @@ def _json_log(event: str, **extra):
     Helper that emits a single JSON-formatted log line.
     """
     logging.getLogger("ai_engine").info(json.dumps({"event": event, **extra}))
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # CORS configuration
@@ -90,10 +94,21 @@ async def lifespan(app: FastAPI):
     """
 
     # ----- Startup --------------------------------------------------------- #
+    
+    # Validate environment variables
+    env_results = validate_environment()
+    if not env_results["valid"]:
+        logger.error("Environment validation failed!")
+        print_env_report()
+        # Note: Not raising exception to allow development with warnings
+    else:
+        logger.info("Environment validation passed")
+    
     create_db_and_tables()
 
-    thread = threading.Thread(target=trigger_engine.start, daemon=True)
-    thread.start()
+    # Temporarily disable trigger engine to avoid crashes
+    # thread = threading.Thread(target=trigger_engine.start, daemon=True)
+    # thread.start()
 
     try:
         # Instrument Prometheus metrics (lazy import to avoid hard-dep in tests)
@@ -108,9 +123,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # ----- Shutdown ---------------------------------------------------- #
-        trigger_engine.stop()
+        # trigger_engine.stop()
         # Give the thread a moment to finish its current tick
-        thread.join(timeout=1)
+        # thread.join(timeout=1)
+        pass
 
 
 # --------------------------------------------------------------------------- #
@@ -191,9 +207,41 @@ app.include_router(websocket_router)
 # --------------------------------------------------------------------------- #
 
 @app.get("/health", include_in_schema=False)
-async def health_check() -> dict[str, str]:
-    """Light-weight health-check used by Docker / k8s."""
-    return {"status": "ok"}
+async def health_check() -> dict:
+    """Comprehensive health-check endpoint for all services."""
+    try:
+        from .utils.redis_client import get_redis_client, is_redis_available
+        
+        # Check database
+        db_status = db_health_check()
+        
+        # Check Redis
+        redis_status = {"status": "not_configured", "error": "Redis client not available"}
+        if is_redis_available():
+            redis_client = get_redis_client()
+            redis_status = redis_client.health_check()
+        
+        # Overall status
+        overall_status = "healthy"
+        if db_status.get("status") != "healthy" or redis_status.get("status") != "healthy":
+            overall_status = "degraded"
+        
+        return {
+            "status": overall_status,
+            "timestamp": time.time(),
+            "services": {
+                "database": db_status,
+                "redis": redis_status
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "timestamp": time.time(),
+            "error": str(e)
+        }
 
 @app.get("/")
 async def root():

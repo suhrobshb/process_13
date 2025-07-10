@@ -1,424 +1,196 @@
-name: CI/CD Pipeline
+name: Comprehensive CI/CD Pipeline
 
 on:
-  pull_request:
-    branches:
-      - main
   push:
-    branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      action:
-        description: 'Action to perform'
-        required: true
-        default: 'deploy'
-        type: choice
-        options:
-          - deploy
-          - rollback
-      environment:
-        description: 'Environment to target'
-        required: true
-        default: 'staging'
-        type: choice
-        options:
-          - staging
-          - production
-      tag:
-        description: 'Image tag for rollback (e.g., commit SHA)'
-        required: false
-        type: string
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
 
 env:
-  # Docker registry settings
-  REGISTRY: ghcr.io
-  IMAGE_NAME_API: ${{ github.repository }}/api
-  IMAGE_NAME_DASHBOARD: ${{ github.repository }}/dashboard
-  # AWS settings
-  AWS_REGION: us-east-1
-  # Deployment settings
-  STAGING_SERVER: staging.example.com
-  PROD_SERVER: production.example.com
+  PYTHON_VERSION: '3.9'
+  NODE_VERSION: '18'
 
 jobs:
-  lint_and_test:
-    name: Lint and Test
+  # Code Quality and Linting
+  code-quality:
+    name: Code Quality & Linting
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: Install Python dependencies
+      run: |
+        pip install --upgrade pip
+        pip install pre-commit black isort flake8 mypy bandit safety
+        pip install -r requirements.txt
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: dashboard_ui_v2/package-lock.json
+    
+    - name: Install frontend dependencies
+      run: |
+        cd dashboard_ui_v2
+        npm ci
+    
+    - name: Run pre-commit hooks
+      run: |
+        pre-commit install
+        pre-commit run --all-files --show-diff-on-failure
+    
+    - name: Python Code Formatting (Black)
+      run: black --check --diff ai_engine/ tests/
+    
+    - name: Python Import Sorting (isort)
+      run: isort --check-only --diff ai_engine/ tests/
+    
+    - name: Python Linting (Flake8)
+      run: flake8 ai_engine/ tests/
+    
+    - name: Python Type Checking (MyPy)
+      run: mypy ai_engine/ --ignore-missing-imports
+    
+    - name: Python Security Scan (Bandit)
+      run: bandit -r ai_engine/ -f json -o bandit-report.json
+    
+    - name: Python Dependency Security Scan
+      run: safety check --json --output safety-report.json
+      continue-on-error: true
+    
+    - name: Frontend Linting (ESLint)
+      run: |
+        cd dashboard_ui_v2
+        npm run lint
+    
+    - name: Frontend Formatting (Prettier)
+      run: |
+        cd dashboard_ui_v2
+        npx prettier --check "src/**/*.{js,jsx,ts,tsx,json,css,md}"
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install flake8 black isort mypy pytest pytest-cov
-
-      - name: Lint with flake8
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-
-      - name: Check formatting with black
-        run: |
-          black --check .
-
-      - name: Sort imports with isort
-        run: |
-          isort --check-only --profile black .
-
-      - name: Type check with mypy
-        run: |
-          mypy ai_engine
-
-      - name: Run tests with pytest
-        run: |
-          pytest --cov=ai_engine tests/
-
-      - name: Upload test coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: htmlcov/
-
-  security_scan:
-    name: Security Scan
+  # Backend Testing
+  backend-tests:
+    name: Backend Tests
     runs-on: ubuntu-latest
-    needs: lint_and_test
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install bandit safety
-
-      - name: Run Bandit security scan
-        run: |
-          bandit -r ai_engine/ -x tests/,ai_engine/tests/
-
-      - name: Check dependencies for vulnerabilities
-        run: |
-          safety check -r requirements.txt
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          exit-code: '1'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-
-  build_and_push:
-    name: Build and Push Docker Images
-    runs-on: ubuntu-latest
-    needs: [lint_and_test, security_scan]
-    # Only run on push to main or manual workflow dispatch
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for API Docker image
-        id: meta-api
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_API }}
-          tags: |
-            type=sha,format=long
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-
-      - name: Build and push API Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta-api.outputs.tags }}
-          labels: ${{ steps.meta-api.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata for Dashboard Docker image
-        id: meta-dashboard
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_DASHBOARD }}
-          tags: |
-            type=sha,format=long
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-
-      - name: Build and push Dashboard Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./dashboard_ui_v2
-          push: true
-          tags: ${{ steps.meta-dashboard.outputs.tags }}
-          labels: ${{ steps.meta-dashboard.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy_staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: build_and_push
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && github.event.inputs.action == 'deploy')
-    environment:
-      name: staging
-      url: https://${{ env.STAGING_SERVER }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.STAGING_SSH_KEY }}
-
-      - name: Get image tags
-        id: get-image-tags
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.action }}" == "rollback" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "API_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-            echo "DASHBOARD_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "API_TAG=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-            echo "DASHBOARD_TAG=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Deploy to Staging
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ env.STAGING_SERVER }} << 'EOF'
-            cd /opt/ai_engine
-            
-            # Pull latest code
-            git pull
-            
-            # Update .env.prod file with new image tags
-            sed -i 's/^API_IMAGE_TAG=.*/API_IMAGE_TAG=${{ steps.get-image-tags.outputs.API_TAG }}/' .env.prod
-            sed -i 's/^DASHBOARD_IMAGE_TAG=.*/DASHBOARD_IMAGE_TAG=${{ steps.get-image-tags.outputs.DASHBOARD_TAG }}/' .env.prod
-            
-            # Pull new images
-            docker-compose -f docker-compose.prod.yml pull
-            
-            # Deploy with zero downtime
-            docker-compose -f docker-compose.prod.yml up -d --remove-orphans
-            
-            # Run database migrations
-            docker-compose -f docker-compose.prod.yml exec -T api python -m alembic upgrade head
-            
-            # Clean up old images
-            docker image prune -a -f --filter "until=24h"
-          EOF
-
-      - name: Verify Deployment
-        run: |
-          # Wait for services to be ready
-          sleep 30
-          
-          # Check if the API is responding
-          curl -sSf https://${{ env.STAGING_SERVER }}/api/health || exit 1
-          
-          echo "Staging deployment successful!"
-
-  deploy_production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: deploy_staging
-    if: (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production' && github.event.inputs.action == 'deploy')
-    environment:
-      name: production
-      url: https://${{ env.PROD_SERVER }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
-
-      - name: Get image tags
-        id: get-image-tags
-        run: |
-          if [ "${{ github.event.inputs.action }}" == "rollback" ] && [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "API_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-            echo "DASHBOARD_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          else
-            echo "API_TAG=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-            echo "DASHBOARD_TAG=sha-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Deploy to Production
-        run: |
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ env.PROD_SERVER }} << 'EOF'
-            cd /opt/ai_engine
-            
-            # Pull latest code
-            git pull
-            
-            # Update .env.prod file with new image tags
-            sed -i 's/^API_IMAGE_TAG=.*/API_IMAGE_TAG=${{ steps.get-image-tags.outputs.API_TAG }}/' .env.prod
-            sed -i 's/^DASHBOARD_IMAGE_TAG=.*/DASHBOARD_IMAGE_TAG=${{ steps.get-image-tags.outputs.DASHBOARD_TAG }}/' .env.prod
-            
-            # Pull new images
-            docker-compose -f docker-compose.prod.yml pull
-            
-            # Deploy with zero downtime
-            docker-compose -f docker-compose.prod.yml up -d --remove-orphans
-            
-            # Run database migrations
-            docker-compose -f docker-compose.prod.yml exec -T api python -m alembic upgrade head
-            
-            # Clean up old images
-            docker image prune -a -f --filter "until=24h"
-          EOF
-
-      - name: Verify Deployment
-        run: |
-          # Wait for services to be ready
-          sleep 30
-          
-          # Check if the API is responding
-          curl -sSf https://${{ env.PROD_SERVER }}/api/health || exit 1
-          
-          echo "Production deployment successful!"
-
-  rollback:
-    name: Rollback Deployment
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback'
-    environment:
-      name: ${{ github.event.inputs.environment }}
-      url: ${{ github.event.inputs.environment == 'production' && format('https://{0}', env.PROD_SERVER) || format('https://{0}', env.STAGING_SERVER) }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ github.event.inputs.environment == 'production' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}
-
-      - name: Set target server
-        id: set-target
-        run: |
-          if [ "${{ github.event.inputs.environment }}" == "production" ]; then
-            echo "SERVER=${{ env.PROD_SERVER }}" >> $GITHUB_OUTPUT
-          else
-            echo "SERVER=${{ env.STAGING_SERVER }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Rollback Deployment
-        run: |
-          if [ -z "${{ github.event.inputs.tag }}" ]; then
-            echo "Error: Tag is required for rollback"
-            exit 1
-          fi
-          
-          ssh -o StrictHostKeyChecking=no ubuntu@${{ steps.set-target.outputs.SERVER }} << 'EOF'
-            cd /opt/ai_engine
-            
-            # Update .env.prod file with rollback image tags
-            sed -i 's/^API_IMAGE_TAG=.*/API_IMAGE_TAG=${{ github.event.inputs.tag }}/' .env.prod
-            sed -i 's/^DASHBOARD_IMAGE_TAG=.*/DASHBOARD_IMAGE_TAG=${{ github.event.inputs.tag }}/' .env.prod
-            
-            # Pull specific images
-            docker-compose -f docker-compose.prod.yml pull
-            
-            # Deploy with zero downtime
-            docker-compose -f docker-compose.prod.yml up -d --remove-orphans
-            
-            # No migrations for rollback to avoid schema conflicts
-          EOF
-
-      - name: Verify Rollback
-        run: |
-          # Wait for services to be ready
-          sleep 30
-          
-          # Check if the API is responding
-          curl -sSf https://${{ steps.set-target.outputs.SERVER }}/api/health || exit 1
-          
-          echo "Rollback to ${{ github.event.inputs.tag }} successful!"
-
-  notify:
-    name: Send Notifications
-    runs-on: ubuntu-latest
-    needs: [deploy_staging, deploy_production, rollback]
-    if: always()
-    steps:
-      - name: Determine deployment status
-        id: status
-        run: |
-          if [ "${{ contains(needs.*.result, 'failure') }}" == "true" ]; then
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "message=Deployment failed! Check the logs for details." >> $GITHUB_OUTPUT
-          else
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "message=Deployment completed successfully!" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send Slack notification
-        if: env.SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v1.25.0
-        with:
-          payload: |
-            {
-              "text": "${{ steps.status.outputs.message }}",
-              "blocks": [
-                {
-                  "type": "header",
-                  "text": {
-                    "type": "plain_text",
-                    "text": "Deployment ${{ steps.status.outputs.status == 'success' && 'Successful' || 'Failed' }}"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*Repository:* ${{ github.repository }}\n*Environment:* ${{ github.event.inputs.environment || 'staging' }}\n*Action:* ${{ github.event.inputs.action || 'deploy' }}\n*Triggered by:* ${{ github.actor }}"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow Run>"
-                  }
-                }
-              ]
-            }
+    needs: code-quality
+    
+    services:
+      postgres:
+        image: postgres:13
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: autoops_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Run backend tests
+      run: |
+        python tests/test_comprehensive_fixed.py
+        python tests/test_dependency_fixes.py
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/autoops_test
+        REDIS_URL: redis://localhost:6379/0
+    
+    - name: Run integration tests
+      run: |
+        python tests/test_integration_suite.py
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: dashboard_ui_v2/package.json
+    
+    - name: Install frontend dependencies
+      run: |
+        cd dashboard_ui_v2
+        npm ci
+    
+    - name: Run frontend tests
+      run: |
+        cd dashboard_ui_v2
+        npm run test:ci
+    
+    - name: Build frontend
+      run: |
+        cd dashboard_ui_v2
+        npm run build
+
+  coverage-report:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-tests]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Generate coverage report
+      run: |
+        python tests/test_coverage_reporter.py
+    
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-reports
+        path: |
+          comprehensive_test_coverage_report.json
+          integration_test_report.json

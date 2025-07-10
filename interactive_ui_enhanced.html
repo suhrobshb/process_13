@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Process 13 - Enhanced Interactive Dashboard</title>
+    <script src="https://unpkg.com/lucide-react@0.395.0/dist/lucide-react.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-indicator {
+            animation: pulse 2s infinite;
+        }
+        
+        .recording-indicator {
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+        
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 16px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+        }
+        
+        .notification.show {
+            transform: translateX(0);
+        }
+        
+        .notification.success { background-color: #10b981; }
+        .notification.error { background-color: #ef4444; }
+        .notification.info { background-color: #3b82f6; }
+        .notification.warning { background-color: #f59e0b; }
+        
+        .glassmorphism {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .workflow-card {
+            transition: all 0.3s ease;
+        }
+        
+        .workflow-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        
+        .command-input {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+        }
+        
+        .command-input::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-4">
+                    <div class="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                        <i data-lucide="cpu" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900">Process 13</h1>
+                        <p class="text-sm text-gray-600">AI-Powered Automation Engine</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="connection-status" class="flex items-center space-x-2">
+                        <div class="w-3 h-3 bg-green-500 rounded-full status-indicator"></div>
+                        <span class="text-sm text-gray-600">Connected</span>
+                    </div>
+                    <button id="notifications-btn" class="relative p-2 text-gray-600 hover:text-gray-900">
+                        <i data-lucide="bell" class="w-6 h-6"></i>
+                        <span id="notification-count" class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center hidden">0</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto px-6 py-8">
+        <!-- Dashboard Stats Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow-sm p-6 workflow-card">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-blue-100 rounded-lg">
+                        <i data-lucide="workflow" class="w-6 h-6 text-blue-600"></i>
+                    </div>
+                    <span class="text-green-600 text-sm font-medium" id="workflows-trend">+12%</span>
+                </div>
+                <p class="text-gray-600 text-sm font-medium">Workflows Automated</p>
+                <p class="text-3xl font-bold text-gray-900" id="workflows-count">-</p>
+                <p class="text-gray-500 text-sm" id="workflows-subtitle">Loading...</p>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-6 workflow-card">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-green-100 rounded-lg">
+                        <i data-lucide="clock" class="w-6 h-6 text-green-600"></i>
+                    </div>
+                    <span class="text-green-600 text-sm font-medium" id="hours-trend">+18%</span>
+                </div>
+                <p class="text-gray-600 text-sm font-medium">Hours Saved (Monthly)</p>
+                <p class="text-3xl font-bold text-gray-900" id="hours-saved">-</p>
+                <p class="text-gray-500 text-sm" id="hours-subtitle">Loading...</p>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-6 workflow-card">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-purple-100 rounded-lg">
+                        <i data-lucide="target" class="w-6 h-6 text-purple-600"></i>
+                    </div>
+                    <span class="text-green-600 text-sm font-medium" id="accuracy-trend">+2.3%</span>
+                </div>
+                <p class="text-gray-600 text-sm font-medium">Process Accuracy</p>
+                <p class="text-3xl font-bold text-gray-900" id="process-accuracy">-</p>
+                <p class="text-gray-500 text-sm" id="accuracy-subtitle">Loading...</p>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-6 workflow-card">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="p-3 bg-orange-100 rounded-lg">
+                        <i data-lucide="activity" class="w-6 h-6 text-orange-600"></i>
+                    </div>
+                    <span class="text-blue-600 text-sm font-medium" id="executions-trend">Today</span>
+                </div>
+                <p class="text-gray-600 text-sm font-medium">Executions</p>
+                <p class="text-3xl font-bold text-gray-900" id="executions-today">-</p>
+                <p class="text-gray-500 text-sm" id="executions-subtitle">Loading...</p>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+            <!-- Recent Workflows -->
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm">
+                <div class="p-6 border-b border-gray-200">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-900">Recent Workflows</h3>
+                        <button id="refresh-workflows" class="text-blue-600 hover:text-blue-800 text-sm font-medium">
+                            <i data-lucide="refresh-cw" class="w-4 h-4 inline mr-1"></i>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div id="workflows-loading" class="flex items-center justify-center py-8">
+                        <div class="loading-spinner"></div>
+                        <span class="ml-3 text-gray-600">Loading workflows...</span>
+                    </div>
+                    <div id="workflows-table" class="hidden">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="text-left text-sm font-medium text-gray-600 border-b">
+                                    <th class="pb-3">Name</th>
+                                    <th class="pb-3">Status</th>
+                                    <th class="pb-3">Last Run</th>
+                                    <th class="pb-3">Efficiency</th>
+                                    <th class="pb-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="workflows-tbody" class="text-sm">
+                                <!-- Dynamic content -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Health -->
+            <div class="bg-white rounded-xl shadow-sm">
+                <div class="p-6 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-900">System Health</h3>
+                </div>
+                <div class="p-6">
+                    <div id="health-loading" class="flex items-center justify-center py-8">
+                        <div class="loading-spinner"></div>
+                        <span class="ml-3 text-gray-600">Checking health...</span>
+                    </div>
+                    <div id="health-status" class="space-y-4 hidden">
+                        <!-- Dynamic content -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recording Studio -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div class="bg-gradient-to-r from-red-500 to-pink-600 rounded-xl shadow-lg text-white">
+                <div class="p-6">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h3 class="text-xl font-bold">Recording Studio</h3>
+                            <p class="text-red-100">Capture new workflows in real-time</p>
+                        </div>
+                        <div id="recording-indicator" class="w-4 h-4 bg-white rounded-full hidden recording-indicator"></div>
+                    </div>
+                    
+                    <div id="recording-controls" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-red-100 mb-2">Workflow Name</label>
+                            <input type="text" id="workflow-name" placeholder="Enter workflow name..." 
+                                   class="w-full px-4 py-2 rounded-lg bg-white bg-opacity-20 border border-white border-opacity-30 text-white placeholder-red-200">
+                        </div>
+                        <div class="flex space-x-3">
+                            <button id="start-recording" class="flex-1 bg-white text-red-600 px-4 py-2 rounded-lg font-medium hover:bg-red-50 transition-colors">
+                                <i data-lucide="circle" class="w-4 h-4 inline mr-2"></i>
+                                Start Recording
+                            </button>
+                            <button id="stop-recording" class="flex-1 bg-red-700 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-800 transition-colors hidden">
+                                <i data-lucide="square" class="w-4 h-4 inline mr-2"></i>
+                                Stop Recording
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="recording-status" class="mt-4 p-4 bg-white bg-opacity-20 rounded-lg hidden">
+                        <div class="text-sm">
+                            <div class="flex justify-between items-center">
+                                <span>Session ID:</span>
+                                <span id="session-id" class="font-mono">-</span>
+                            </div>
+                            <div class="flex justify-between items-center mt-2">
+                                <span>Duration:</span>
+                                <span id="recording-duration" class="font-mono">00:00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NLP Command Interface -->
+            <div class="bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl shadow-lg text-white">
+                <div class="p-6">
+                    <div class="mb-6">
+                        <h3 class="text-xl font-bold">AI Command Interface</h3>
+                        <p class="text-purple-100">Create workflows using natural language</p>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-purple-100 mb-2">Voice your command</label>
+                            <textarea id="nlp-command" placeholder="e.g., 'Create a workflow to process invoices from email attachments'" 
+                                      class="w-full px-4 py-3 rounded-lg command-input placeholder-purple-200 resize-none" rows="3"></textarea>
+                        </div>
+                        <button id="process-command" class="w-full bg-white text-purple-600 px-4 py-2 rounded-lg font-medium hover:bg-purple-50 transition-colors">
+                            <i data-lucide="zap" class="w-4 h-4 inline mr-2"></i>
+                            Process Command
+                        </button>
+                    </div>
+                    
+                    <div id="nlp-result" class="mt-4 p-4 bg-white bg-opacity-20 rounded-lg hidden">
+                        <div class="text-sm">
+                            <div class="mb-2">
+                                <span class="font-medium">Intent:</span>
+                                <span id="parsed-intent" class="ml-2">-</span>
+                            </div>
+                            <div class="mb-2">
+                                <span class="font-medium">Confidence:</span>
+                                <span id="confidence-score" class="ml-2">-</span>
+                            </div>
+                            <div>
+                                <span class="font-medium">Suggestion:</span>
+                                <div id="workflow-suggestion" class="mt-2 p-2 bg-white bg-opacity-20 rounded text-xs">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="bg-white rounded-xl shadow-sm p-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <button onclick="openFullUI()" class="p-4 text-center border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                    <i data-lucide="layout-grid" class="w-8 h-8 mx-auto mb-2 text-blue-600"></i>
+                    <span class="text-sm font-medium text-gray-900">Full Dashboard</span>
+                </button>
+                <button onclick="runDemo('simple')" class="p-4 text-center border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                    <i data-lucide="play" class="w-8 h-8 mx-auto mb-2 text-green-600"></i>
+                    <span class="text-sm font-medium text-gray-900">Run Demo</span>
+                </button>
+                <button onclick="showAnalytics()" class="p-4 text-center border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                    <i data-lucide="bar-chart-3" class="w-8 h-8 mx-auto mb-2 text-purple-600"></i>
+                    <span class="text-sm font-medium text-gray-900">Analytics</span>
+                </button>
+                <button onclick="openSettings()" class="p-4 text-center border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                    <i data-lucide="settings" class="w-8 h-8 mx-auto mb-2 text-gray-600"></i>
+                    <span class="text-sm font-medium text-gray-900">Settings</span>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Notification Container -->
+    <div id="notification-container"></div>
+
+    <script>
+        // =============================================================================
+        // Global Variables
+        // =============================================================================
+        
+        const API_BASE = 'http://localhost:8000';
+        let websocket = null;
+        let recordingSession = null;
+        let recordingTimer = null;
+        let recordingStartTime = null;
+
+        // =============================================================================
+        // Utility Functions
+        // =============================================================================
+        
+        function showNotification(message, type = 'info', duration = 5000) {
+            const container = document.getElementById('notification-container');
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            container.appendChild(notification);
+            
+            // Show notification
+            setTimeout(() => notification.classList.add('show'), 100);
+            
+            // Hide and remove notification
+            setTimeout(() => {
+                notification.classList.remove('show');
+                setTimeout(() => container.removeChild(notification), 300);
+            }, duration);
+        }
+
+        function formatDuration(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function setConnectionStatus(connected) {
+            const statusEl = document.getElementById('connection-status');
+            const indicator = statusEl.querySelector('.status-indicator');
+            const text = statusEl.querySelector('span');
+            
+            if (connected) {
+                indicator.className = 'w-3 h-3 bg-green-500 rounded-full status-indicator';
+                text.textContent = 'Connected';
+            } else {
+                indicator.className = 'w-3 h-3 bg-red-500 rounded-full';
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        // =============================================================================
+        // API Functions
+        // =============================================================================
+        
+        async function fetchDashboardStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/dashboard/stats`);
+                const data = await response.json();
+                
+                document.getElementById('workflows-count').textContent = data.workflows_count;
+                document.getElementById('workflows-subtitle').textContent = `${data.active_workflows} active workflows`;
+                
+                document.getElementById('hours-saved').textContent = data.hours_saved;
+                document.getElementById('hours-subtitle').textContent = `Equivalent to ${(data.hours_saved / 160).toFixed(1)} FTE`;
+                
+                document.getElementById('process-accuracy').textContent = `${data.process_accuracy}%`;
+                document.getElementById('accuracy-subtitle').textContent = 'Up from 92% manual';
+                
+                document.getElementById('executions-today').textContent = data.executions_today;
+                document.getElementById('executions-subtitle').textContent = 'Peak at 2 PM';
+                
+                return data;
+            } catch (error) {
+                console.error('Failed to fetch dashboard stats:', error);
+                showNotification('Failed to load dashboard statistics', 'error');
+                return null;
+            }
+        }
+
+        async function fetchRecentWorkflows() {
+            try {
+                document.getElementById('workflows-loading').classList.remove('hidden');
+                document.getElementById('workflows-table').classList.add('hidden');
+                
+                const response = await fetch(`${API_BASE}/api/dashboard/recent-workflows`);
+                const workflows = await response.json();
+                
+                const tbody = document.getElementById('workflows-tbody');
+                tbody.innerHTML = workflows.map(workflow => `
+                    <tr class="border-b border-gray-100 last:border-0">
+                        <td class="py-3 font-medium text-gray-900">${workflow.name}</td>
+                        <td class="py-3">
+                            <span class="inline-flex px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(workflow.status)}">
+                                ${workflow.status}
+                            </span>
+                        </td>
+                        <td class="py-3 text-gray-600">${workflow.last_run}</td>
+                        <td class="py-3 text-gray-600">${workflow.efficiency}%</td>
+                        <td class="py-3">
+                            <button class="text-blue-600 hover:text-blue-800 text-sm font-medium mr-2">Edit</button>
+                            <button class="text-green-600 hover:text-green-800 text-sm font-medium">Run</button>
+                        </td>
+                    </tr>
+                `).join('');
+                
+                document.getElementById('workflows-loading').classList.add('hidden');
+                document.getElementById('workflows-table').classList.remove('hidden');
+                
+                return workflows;
+            } catch (error) {
+                console.error('Failed to fetch workflows:', error);
+                showNotification('Failed to load workflows', 'error');
+                return [];
+            }
+        }
+
+        async function fetchSystemHealth() {
+            try {
+                document.getElementById('health-loading').classList.remove('hidden');
+                document.getElementById('health-status').classList.add('hidden');
+                
+                const response = await fetch(`${API_BASE}/api/system/health/detailed`);
+                const health = await response.json();
+                
+                const statusEl = document.getElementById('health-status');
+                statusEl.innerHTML = `
+                    <div class="space-y-3">
+                        ${createHealthItem('API Server', health.api_status)}
+                        ${createHealthItem('Database', health.database_status)}
+                        ${createHealthItem('AI Engine', health.ai_engine_status)}
+                        ${createHealthItem('Redis Cache', health.redis_status)}
+                    </div>
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-gray-600">Overall Status:</span>
+                            <span class="font-medium ${health.overall_status === 'healthy' ? 'text-green-600' : 'text-red-600'}">
+                                ${health.overall_status.toUpperCase()}
+                            </span>
+                        </div>
+                        <div class="flex justify-between items-center text-sm mt-1">
+                            <span class="text-gray-600">Uptime:</span>
+                            <span class="font-medium text-gray-900">${health.uptime}</span>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('health-loading').classList.add('hidden');
+                document.getElementById('health-status').classList.remove('hidden');
+                
+                return health;
+            } catch (error) {
+                console.error('Failed to fetch system health:', error);
+                showNotification('Failed to load system health', 'error');
+                return null;
+            }
+        }
+
+        async function startRecording() {
+            const workflowName = document.getElementById('workflow-name').value.trim();
+            if (!workflowName) {
+                showNotification('Please enter a workflow name', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/recording/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ workflow_name: workflowName })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                recordingSession = await response.json();
+                
+                // Update UI
+                document.getElementById('start-recording').classList.add('hidden');
+                document.getElementById('stop-recording').classList.remove('hidden');
+                document.getElementById('recording-indicator').classList.remove('hidden');
+                document.getElementById('recording-status').classList.remove('hidden');
+                
+                document.getElementById('session-id').textContent = recordingSession.session_id;
+                
+                // Start timer
+                recordingStartTime = Date.now();
+                recordingTimer = setInterval(updateRecordingDuration, 1000);
+                
+                showNotification(`Recording started: ${workflowName}`, 'success');
+                
+            } catch (error) {
+                console.error('Failed to start recording:', error);
+                showNotification('Failed to start recording', 'error');
+            }
+        }
+
+        async function stopRecording() {
+            if (!recordingSession) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/api/recording/stop/${recordingSession.session_id}`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                // Update UI
+                document.getElementById('start-recording').classList.remove('hidden');
+                document.getElementById('stop-recording').classList.add('hidden');
+                document.getElementById('recording-indicator').classList.add('hidden');
+                document.getElementById('recording-status').classList.add('hidden');
+                
+                // Stop timer
+                if (recordingTimer) {
+                    clearInterval(recordingTimer);
+                    recordingTimer = null;
+                }
+                
+                showNotification('Recording stopped successfully', 'success');
+                recordingSession = null;
+                
+            } catch (error) {
+                console.error('Failed to stop recording:', error);
+                showNotification('Failed to stop recording', 'error');
+            }
+        }
+
+        async function processNLPCommand() {
+            const command = document.getElementById('nlp-command').value.trim();
+            if (!command) {
+                showNotification('Please enter a command', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/nlp/parse-command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                // Update UI
+                document.getElementById('parsed-intent').textContent = result.parsed_intent;
+                document.getElementById('confidence-score').textContent = `${(result.confidence * 100).toFixed(1)}%`;
+                document.getElementById('workflow-suggestion').textContent = JSON.stringify(result.workflow_suggestion, null, 2);
+                document.getElementById('nlp-result').classList.remove('hidden');
+                
+                showNotification('Command processed successfully', 'success');
+                
+            } catch (error) {
+                console.error('Failed to process NLP command:', error);
+                showNotification('Failed to process command', 'error');
+            }
+        }
+
+        // =============================================================================
+        // WebSocket Functions
+        // =============================================================================
+        
+        function initializeWebSocket() {
+            try {
+                websocket = new WebSocket('ws://localhost:8000/ws/notifications');
+                
+                websocket.onopen = function() {
+                    console.log('WebSocket connected');
+                    setConnectionStatus(true);
+                    showNotification('Real-time connection established', 'success');
+                };
+                
+                websocket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleWebSocketMessage(data);
+                    } catch (error) {
+                        console.error('Failed to parse WebSocket message:', error);
+                    }
+                };
+                
+                websocket.onclose = function() {
+                    console.log('WebSocket disconnected');
+                    setConnectionStatus(false);
+                    showNotification('Real-time connection lost', 'warning');
+                    
+                    // Attempt to reconnect after 5 seconds
+                    setTimeout(initializeWebSocket, 5000);
+                };
+                
+                websocket.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    setConnectionStatus(false);
+                };
+                
+            } catch (error) {
+                console.error('Failed to initialize WebSocket:', error);
+                setConnectionStatus(false);
+            }
+        }
+
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'recording_started':
+                    showNotification(`Recording started: ${data.workflow_name}`, 'info');
+                    break;
+                case 'recording_stopped':
+                    showNotification('Recording session stopped', 'info');
+                    break;
+                case 'workflow_update':
+                    fetchRecentWorkflows();
+                    break;
+                case 'stats_update':
+                    fetchDashboardStats();
+                    break;
+                default:
+                    console.log('Unknown WebSocket message type:', data.type);
+            }
+        }
+
+        // =============================================================================
+        // Helper Functions
+        // =============================================================================
+        
+        function getStatusColor(status) {
+            switch (status.toLowerCase()) {
+                case 'active': return 'bg-green-100 text-green-800';
+                case 'draft': return 'bg-gray-100 text-gray-800';
+                case 'error': return 'bg-red-100 text-red-800';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        }
+
+        function createHealthItem(name, status) {
+            const color = status === 'healthy' ? 'text-green-600' : 'text-red-600';
+            const icon = status === 'healthy' ? '✓' : '✗';
+            return `
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-600">${name}:</span>
+                    <span class="${color} font-medium">${icon} ${status.toUpperCase()}</span>
+                </div>
+            `;
+        }
+
+        function updateRecordingDuration() {
+            if (!recordingStartTime) return;
+            
+            const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+            document.getElementById('recording-duration').textContent = formatDuration(elapsed);
+        }
+
+        // =============================================================================
+        // Quick Action Functions
+        // =============================================================================
+        
+        function openFullUI() {
+            window.open('/user_interface_preview.html', '_blank');
+        }
+
+        function runDemo(type) {
+            showNotification(`Running ${type} demo...`, 'info');
+            // Demo implementation would go here
+        }
+
+        function showAnalytics() {
+            showNotification('Opening analytics dashboard...', 'info');
+            // Analytics implementation would go here
+        }
+
+        function openSettings() {
+            showNotification('Opening settings...', 'info');
+            // Settings implementation would go here
+        }
+
+        // =============================================================================
+        // Event Listeners
+        // =============================================================================
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Lucide icons
+            lucide.createIcons();
+            
+            // Set up event listeners
+            document.getElementById('start-recording').addEventListener('click', startRecording);
+            document.getElementById('stop-recording').addEventListener('click', stopRecording);
+            document.getElementById('process-command').addEventListener('click', processNLPCommand);
+            document.getElementById('refresh-workflows').addEventListener('click', fetchRecentWorkflows);
+            
+            // Handle Enter key in NLP command textarea
+            document.getElementById('nlp-command').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    processNLPCommand();
+                }
+            });
+            
+            // Initial data load
+            loadInitialData();
+            
+            // Initialize WebSocket connection
+            initializeWebSocket();
+            
+            // Set up auto-refresh for dashboard stats every 30 seconds
+            setInterval(fetchDashboardStats, 30000);
+            
+            // Set up auto-refresh for system health every 60 seconds
+            setInterval(fetchSystemHealth, 60000);
+        });
+
+        async function loadInitialData() {
+            try {
+                await Promise.all([
+                    fetchDashboardStats(),
+                    fetchRecentWorkflows(),
+                    fetchSystemHealth()
+                ]);
+                
+                showNotification('Dashboard loaded successfully', 'success');
+            } catch (error) {
+                console.error('Failed to load initial data:', error);
+                showNotification('Failed to load some dashboard data', 'warning');
+            }
+        }
+    </script>
+</body>
+</html>

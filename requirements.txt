@@ -76,6 +76,9 @@ gunicorn>=20.1.0
 # Testing dependencies
 pytest>=8.0.0
 pytest-mock>=3.12.0
+pytest-cov>=4.0.0
+pytest-xdist>=3.3.0
+mutmut>=2.4.3
 responses>=0.25.0
 
 # Browser automation & playwright helpers
@@ -84,3 +87,12 @@ pytest-playwright>=0.4.4
 
 # Security dependencies
 restrictedpython>=5.2
+
+# Load testing dependencies
+locust>=2.17.0
+
+# Monitoring dependencies
+schedule>=1.2.0
+
+# Redis client
+redis>=5.0.0

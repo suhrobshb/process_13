@@ -1,0 +1,47 @@
+# Prettier ignore patterns
+# =======================
+
+# Dependencies
+node_modules/
+dist/
+build/
+
+# Generated files
+coverage/
+*.tsbuildinfo
+
+# Package managers
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Environment files
+.env
+.env.local
+.env.production
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Static assets that shouldn't be formatted
+public/
+assets/
+*.min.js
+*.min.css
+
+# Configuration files that have specific formatting
+tsconfig.json
+package.json

@@ -129,8 +129,21 @@ class CircuitBreakerManager:
     share the same state for each circuit breaker.
     """
     def __init__(self):
-        # For production, this should be a client to a distributed store like Redis.
-        # e.g., self._breakers = redis.Redis(...)
+        # Try to use Redis for distributed state, fall back to in-memory
+        try:
+            from .redis_client import get_redis_client, is_redis_available
+            if is_redis_available():
+                self.redis_client = get_redis_client()
+                self.use_redis = True
+                logger.info("Circuit breaker manager using Redis for distributed state")
+            else:
+                self.use_redis = False
+                logger.warning("Circuit breaker manager using in-memory state (Redis unavailable)")
+        except ImportError:
+            self.use_redis = False
+            logger.warning("Circuit breaker manager using in-memory state (Redis client not available)")
+        
+        # In-memory fallback
         self._breakers: Dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 

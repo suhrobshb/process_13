@@ -27,7 +27,8 @@ Key Responsibilities:
 
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
-from typing import Dict
+from typing import Dict, Any
+import json
 
 # Import the core collaboration logic handler and authentication dependencies
 from ..collaboration.collaboration_manager import collaboration_manager
@@ -96,3 +97,53 @@ async def collaboration_websocket_endpoint(
         )
         # Ensure disconnection on error
         collaboration_manager.disconnect(workflow_id, user.id)
+
+
+# Simple WebSocket connection manager for recording events
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[int, WebSocket] = {}
+
+    async def connect(self, task_id: int, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[task_id] = websocket
+
+    def disconnect(self, task_id: int):
+        if task_id in self.active_connections:
+            del self.active_connections[task_id]
+
+    async def send_message(self, task_id: int, message: Dict[str, Any]):
+        if task_id in self.active_connections:
+            websocket = self.active_connections[task_id]
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception as e:
+                logger.error(f"Error sending message to task {task_id}: {e}")
+                self.disconnect(task_id)
+
+
+# Global connection manager instance
+manager = ConnectionManager()
+
+
+async def broadcast_recording_event(task_id: int, event_data: Dict[str, Any]):
+    """
+    Broadcasts recording analysis events to connected WebSocket clients.
+    """
+    await manager.send_message(task_id, event_data)
+
+
+# WebSocket endpoint for recording analysis results
+@router.websocket("/recording/{task_id}")
+async def recording_websocket_endpoint(websocket: WebSocket, task_id: int):
+    """
+    WebSocket endpoint for streaming recording analysis results.
+    """
+    await manager.connect(task_id, websocket)
+    try:
+        while True:
+            # Keep the connection alive and wait for disconnection
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(task_id)
+        logger.info(f"WebSocket disconnected for recording task {task_id}")

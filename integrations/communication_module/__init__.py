@@ -1,0 +1,1 @@
+"""Communication module for email, SMS, and call integrations."""

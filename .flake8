@@ -1,0 +1,72 @@
+# Flake8 Configuration
+# ====================
+# Python linting configuration for consistent code style
+
+[flake8]
+max-line-length = 100
+max-complexity = 10
+select = E,W,F,C,N
+ignore = 
+    # Black compatibility
+    E203,  # whitespace before ':'
+    E501,  # line too long (handled by Black)
+    W503,  # line break before binary operator
+    # Allow lambda expressions
+    E731,  # do not assign a lambda expression
+    # Allow broad except clauses in specific cases
+    E722,  # do not use bare 'except'
+
+exclude = 
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    migrations,
+    node_modules,
+    dashboard_ui_v2/node_modules,
+    .pytest_cache,
+    .mypy_cache,
+    build,
+    dist,
+    *.egg-info
+
+# Import order checking
+import-order-style = pycharm
+application-import-names = ai_engine,tests
+
+# Docstring conventions
+docstring-convention = google
+
+# Security and bug detection
+extend-ignore = 
+    # Allow string formatting
+    S001,  # possible hardcoded password
+    # Allow assert statements in tests
+    S101,  # use of assert detected
+
+per-file-ignores =
+    # Tests can use assert and have longer lines
+    tests/*:S101,E501,F401,F811
+    # Migration files may have long lines and unused imports
+    migrations/*:E501,F401
+    # Init files may have unused imports
+    __init__.py:F401
+    # Demo and example files may have unused imports
+    demo_*.py:F401,F841
+    simple_demo.py:F401,F841
+    # Configuration files may have unused imports
+    config/*:F401
+
+# Naming conventions
+classmethod-decorators = classmethod
+staticmethod-decorators = staticmethod
+
+# Complexity thresholds
+max-complexity = 15
+
+# Plugin-specific settings
+# flake8-bugbear
+extend-immutable-calls = frozenset,tuple
+# flake8-comprehensions 
+comprehension-style = list

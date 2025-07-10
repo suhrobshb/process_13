@@ -1,0 +1,178 @@
+# Pre-commit Configuration for Code Quality
+# ========================================
+#
+# This configuration ensures consistent code quality across the RPA platform:
+# - Code formatting with Black and Prettier
+# - Linting with Flake8, ESLint, and MyPy
+# - Security scanning with Bandit
+# - Import sorting with isort
+# - Documentation linting
+# - Commit message validation
+#
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Python Code Formatting
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--line-length=100, --target-version=py39]
+        exclude: ^(migrations/|node_modules/|dashboard_ui_v2/node_modules/)
+
+  # Python Import Sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=100, --multi-line=3]
+        exclude: ^(migrations/|node_modules/|dashboard_ui_v2/node_modules/)
+
+  # Python Linting
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: [
+          --max-line-length=100,
+          --extend-ignore=E203,E501,W503,E722,
+          --exclude=migrations,node_modules,dashboard_ui_v2/node_modules
+        ]
+        additional_dependencies: [
+          flake8-docstrings,
+          flake8-import-order,
+          flake8-bugbear,
+          flake8-comprehensions,
+          flake8-security
+        ]
+
+  # Python Type Checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports, --strict-optional, --warn-redundant-casts]
+        exclude: ^(tests/|migrations/|node_modules/|dashboard_ui_v2/)
+        additional_dependencies: [types-requests, types-PyYAML]
+
+  # Python Security Scanning
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: [-r, ., -f, json, -o, bandit-report.json]
+        exclude: ^(tests/|node_modules/|dashboard_ui_v2/node_modules/)
+
+  # JavaScript/TypeScript Formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        files: \.(js|jsx|ts|tsx|json|css|scss|md|yaml|yml)$
+        exclude: ^(ai_engine/|tests/|migrations/|requirements\.txt|\.env)
+        args: [--write, --tab-width=2, --single-quote, --trailing-comma=es5]
+
+  # JavaScript/TypeScript Linting
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.56.0
+    hooks:
+      - id: eslint
+        files: \.(js|jsx|ts|tsx)$
+        exclude: ^(ai_engine/|tests/|migrations/)
+        additional_dependencies: [
+          '@typescript-eslint/parser@^6.0.0',
+          '@typescript-eslint/eslint-plugin@^6.0.0',
+          'eslint-plugin-react@^7.33.0',
+          'eslint-plugin-react-hooks@^4.6.0',
+          'eslint-plugin-import@^2.29.0'
+        ]
+
+  # General File Checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+      - id: end-of-file-fixer
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+      - id: check-yaml
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+      - id: check-json
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-case-conflict
+      - id: check-docstring-first
+        exclude: ^(tests/|migrations/|dashboard_ui_v2/)
+      - id: debug-statements
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+      - id: requirements-txt-fixer
+
+  # Docker Linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+        args: [--ignore, DL3008, --ignore, DL3009, --ignore, DL3015]
+
+  # YAML Linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [-d, '{extends: default, rules: {line-length: {max: 120}, truthy: {check-keys: false}}}']
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+
+  # Shell Script Linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        args: [-x, -e, SC1091]
+
+  # Security: Secrets Detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/|\.env\.example)
+
+  # Markdown Linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.39.0
+    hooks:
+      - id: markdownlint
+        args: [--fix, --ignore, node_modules]
+        exclude: ^(dashboard_ui_v2/node_modules/|node_modules/)
+
+  # Local Testing Hooks
+  - repo: local
+    hooks:
+      - id: python-tests
+        name: Python Tests
+        entry: python -m pytest tests/test_comprehensive_fixed.py -v
+        language: system
+        pass_filenames: false
+        
+      - id: frontend-tests
+        name: Frontend Tests
+        entry: bash -c 'cd dashboard_ui_v2 && npm run test:ci'
+        language: system
+        pass_filenames: false
+
+# Configuration for specific tools
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

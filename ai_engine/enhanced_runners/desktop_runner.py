@@ -78,14 +78,18 @@ class DesktopRunner:
         self.screen_size = pyautogui.size()
         logger.info(f"DesktopRunner initialized for step '{self.step_id}' with {len(self.actions)} actions. Screen size: {self.screen_size}")
 
-    def execute(self) -> Dict[str, Any]:
+    def execute(self, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Executes the entire sequence of desktop actions.
+
+        Args:
+            context: Workflow context with variables from previous steps
 
         Returns:
             A dictionary containing the execution result, including success status,
             a list of individual action results, and total execution time.
         """
+        context = context or {}
         logger.info(f"Executing desktop automation step: {self.step_id}")
         start_time = time.time()
         action_results = []
@@ -98,7 +102,7 @@ class DesktopRunner:
                     raise TimeoutError(f"Step '{self.step_id}' timed out after {self.timeout} seconds.")
 
                 logger.info(f"Executing action {i}/{len(self.actions)}: {action_config.get('type')}")
-                action_result = self._execute_action(action_config)
+                action_result = self._execute_action(action_config, context)
                 action_results.append(action_result)
 
                 if not action_result["success"]:
@@ -129,16 +133,21 @@ class DesktopRunner:
             "execution_time_seconds": execution_time,
         }
 
-    def _execute_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_action(self, action: Dict[str, Any], context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Executes a single desktop action dictionary.
 
         Args:
             action (Dict[str, Any]): The action to perform.
+            context (Dict[str, Any]): Workflow context for variable substitution.
 
         Returns:
             A dictionary with the result of the single action.
         """
+        context = context or {}
+        
+        # Apply context variable substitution to string parameters
+        action = self._substitute_context_variables(action, context)
         action_type = action.get("type", "unknown").lower()
         start_time = time.time()
         result = {"action_type": action_type, "success": True, "details": ""}
@@ -333,4 +342,47 @@ class DesktopRunner:
 
         result["duration_seconds"] = time.time() - start_time
         return result
+
+    def _substitute_context_variables(self, action: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Substitute context variables in action parameters.
+        
+        Args:
+            action: The action dictionary to process
+            context: The workflow context containing variables
+            
+        Returns:
+            The action dictionary with substituted variables
+        """
+        if not context:
+            return action
+            
+        # Create a copy to avoid modifying the original
+        substituted_action = action.copy()
+        
+        # Substitute variables in string values
+        for key, value in substituted_action.items():
+            if isinstance(value, str):
+                for var_name, var_value in context.items():
+                    if isinstance(var_value, (str, int, float, bool)):
+                        placeholder = f"${{{var_name}}}"
+                        if placeholder in value:
+                            substituted_action[key] = value.replace(placeholder, str(var_value))
+            elif isinstance(value, list):
+                # Handle lists of strings (e.g., for hotkey actions)
+                substituted_list = []
+                for item in value:
+                    if isinstance(item, str):
+                        substituted_item = item
+                        for var_name, var_value in context.items():
+                            if isinstance(var_value, (str, int, float, bool)):
+                                placeholder = f"${{{var_name}}}"
+                                if placeholder in substituted_item:
+                                    substituted_item = substituted_item.replace(placeholder, str(var_value))
+                        substituted_list.append(substituted_item)
+                    else:
+                        substituted_list.append(item)
+                substituted_action[key] = substituted_list
+                
+        return substituted_action
 

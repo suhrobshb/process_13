@@ -1,0 +1,193 @@
+# Dependabot configuration for automated dependency updates
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "security-team"
+    assignees:
+      - "platform-team"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    ignore:
+      # Ignore major version updates for stable dependencies
+      - dependency-name: "fastapi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "uvicorn"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sqlmodel"
+        update-types: ["version-update:semver-major"]
+    groups:
+      # Group AI/ML dependencies
+      ai-ml:
+        patterns:
+          - "openai"
+          - "langchain*"
+          - "transformers"
+          - "torch*"
+          - "tensorflow*"
+          - "scikit-learn"
+          - "numpy"
+          - "pandas"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Group web framework dependencies
+      web-framework:
+        patterns:
+          - "fastapi"
+          - "uvicorn"
+          - "starlette"
+          - "pydantic"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Group testing dependencies
+      testing:
+        patterns:
+          - "pytest*"
+          - "mock*"
+          - "responses"
+          - "locust"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Group security dependencies (high priority)
+      security:
+        patterns:
+          - "cryptography"
+          - "python-jose"
+          - "passlib"
+          - "restrictedpython"
+          - "bandit"
+          - "safety"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "devops-team"
+    assignees:
+      - "platform-team"
+    labels:
+      - "github-actions"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "devops-team"
+    assignees:
+      - "platform-team"
+    labels:
+      - "docker"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(docker)"
+      include: "scope"
+
+  # Dashboard UI dependencies (Node.js)
+  - package-ecosystem: "npm"
+    directory: "/dashboard_ui_v2"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "frontend-team"
+    assignees:
+      - "platform-team"
+    labels:
+      - "frontend"
+      - "dependencies"
+    commit-message:
+      prefix: "chore(ui)"
+      include: "scope"
+    ignore:
+      # Ignore major React updates until tested
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "next"
+        update-types: ["version-update:semver-major"]
+    groups:
+      # Group React ecosystem
+      react:
+        patterns:
+          - "react*"
+          - "@types/react*"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Group UI/styling dependencies
+      ui-styling:
+        patterns:
+          - "tailwindcss"
+          - "@tailwindcss/*"
+          - "lucide-react"
+          - "@radix-ui/*"
+        update-types:
+          - "minor"
+          - "patch"
+      
+      # Group TypeScript dependencies
+      typescript:
+        patterns:
+          - "typescript"
+          - "@types/*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Legacy Dashboard dependencies (if exists)
+  - package-ecosystem: "npm"
+    directory: "/dashboard_ui"
+    schedule:
+      interval: "monthly"
+      day: "first monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "frontend-team"
+    assignees:
+      - "platform-team"
+    labels:
+      - "frontend"
+      - "dependencies"
+      - "legacy"
+    commit-message:
+      prefix: "chore(legacy-ui)"
+      include: "scope"
