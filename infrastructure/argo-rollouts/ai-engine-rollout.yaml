@@ -1,0 +1,191 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: ai-engine-api
+  namespace: default
+  labels:
+    app: ai-engine-api
+spec:
+  replicas: 5
+  strategy:
+    canary:
+      # Canary deployment configuration
+      canaryService: ai-engine-api-canary
+      stableService: ai-engine-api-stable
+      trafficRouting:
+        nginx:
+          stableIngress: ai-engine-api-stable
+          annotationPrefix: nginx.ingress.kubernetes.io
+          additionalIngressAnnotations:
+            canary-by-header: X-Canary
+            canary-by-header-value: always
+      steps:
+      # Step 1: Deploy canary to 20% of pods, pause for manual verification
+      - setWeight: 20
+      - pause:
+          duration: 10m
+      
+      # Step 2: Automated analysis for 5 minutes
+      - setWeight: 20
+      - analysis:
+          templates:
+          - templateName: success-rate
+          - templateName: latency-p95
+          args:
+          - name: service-name
+            value: ai-engine-api-canary
+          - name: prometheus-server
+            value: http://prometheus.monitoring.svc.cluster.local:9090
+      
+      # Step 3: Increase traffic to 40% after successful analysis
+      - setWeight: 40
+      - pause:
+          duration: 5m
+      
+      # Step 4: Another analysis round
+      - setWeight: 40
+      - analysis:
+          templates:
+          - templateName: success-rate
+          - templateName: latency-p95
+          - templateName: workflow-failure-rate
+          args:
+          - name: service-name
+            value: ai-engine-api-canary
+      
+      # Step 5: Increase to 60%
+      - setWeight: 60
+      - pause:
+          duration: 5m
+      
+      # Step 6: Final analysis before full promotion
+      - setWeight: 80
+      - analysis:
+          templates:
+          - templateName: success-rate
+          - templateName: latency-p95
+          - templateName: workflow-failure-rate
+          args:
+          - name: service-name
+            value: ai-engine-api-canary
+      
+      # Step 7: Full promotion (100%)
+      - setWeight: 100
+      - pause:
+          duration: 2m
+      
+      # Abort conditions
+      abortScaleDownDelaySeconds: 30
+      scaleDownDelaySeconds: 30
+      scaleDownDelayRevisionLimit: 2
+      
+  selector:
+    matchLabels:
+      app: ai-engine-api
+  template:
+    metadata:
+      labels:
+        app: ai-engine-api
+    spec:
+      serviceAccountName: ai-engine-api
+      containers:
+      - name: api
+        image: ghcr.io/your-org/ai-engine-api:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ai-engine-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: ai-engine-secrets
+              key: redis-url
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-engine-api-stable
+  labels:
+    app: ai-engine-api
+spec:
+  selector:
+    app: ai-engine-api
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-engine-api-canary
+  labels:
+    app: ai-engine-api
+spec:
+  selector:
+    app: ai-engine-api
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-engine-api-stable
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  tls:
+  - hosts:
+    - api.ai-engine.com
+    secretName: ai-engine-api-tls
+  rules:
+  - host: api.ai-engine.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ai-engine-api-stable
+            port:
+              number: 80

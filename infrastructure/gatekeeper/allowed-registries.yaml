@@ -1,0 +1,103 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8sallowedrepos
+  annotations:
+    metadata.gatekeeper.sh/title: "Allowed Container Registries"
+    metadata.gatekeeper.sh/version: 1.0.0
+    description: >-
+      Restricts container images to come from approved registries only.
+      This helps prevent supply chain attacks and ensures image provenance.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sAllowedRepos
+      validation:
+        type: object
+        properties:
+          repos:
+            description: >-
+              List of allowed image repository patterns.
+              Wildcards (*) are supported.
+            type: array
+            items:
+              type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sallowedrepos
+        
+        import rego.v1
+        
+        violation[{"msg": msg}] if {
+            container := input.review.object.spec.containers[_]
+            not allowed_repo(container.image)
+            msg := sprintf("Container image %v is not from an allowed registry", [container.image])
+        }
+        
+        violation[{"msg": msg}] if {
+            container := input.review.object.spec.initContainers[_]
+            not allowed_repo(container.image)
+            msg := sprintf("Init container image %v is not from an allowed registry", [container.image])
+        }
+        
+        violation[{"msg": msg}] if {
+            container := input.review.object.spec.ephemeralContainers[_]
+            not allowed_repo(container.image)
+            msg := sprintf("Ephemeral container image %v is not from an allowed registry", [container.image])
+        }
+        
+        allowed_repo(image) if {
+            repo := input.parameters.repos[_]
+            glob.match(repo, [], image)
+        }
+
+---
+apiVersion: config.gatekeeper.sh/v1alpha1
+kind: K8sAllowedRepos
+metadata:
+  name: allowed-registries
+  namespace: gatekeeper-system
+spec:
+  match:
+    - excludedNamespaces: ["kube-system", "gatekeeper-system"]
+      kinds:
+        - apiGroups: [""]
+          kinds: ["Pod"]
+        - apiGroups: ["apps"]
+          kinds: ["Deployment", "ReplicaSet", "DaemonSet", "StatefulSet"]
+  parameters:
+    repos:
+      # Official Kubernetes images
+      - "registry.k8s.io/*"
+      - "k8s.gcr.io/*"
+      
+      # Docker Hub official images
+      - "docker.io/library/*"
+      - "library/*"
+      
+      # Common trusted registries
+      - "ghcr.io/*"
+      - "quay.io/*"
+      - "gcr.io/*"
+      - "us.gcr.io/*"
+      - "eu.gcr.io/*"
+      - "asia.gcr.io/*"
+      
+      # AWS ECR (example patterns)
+      - "*.dkr.ecr.*.amazonaws.com/*"
+      
+      # Azure ACR (example patterns)
+      - "*.azurecr.io/*"
+      
+      # Your organization's registries (customize as needed)
+      - "your-org.jfrog.io/*"
+      - "registry.your-company.com/*"
+      
+      # Specific application images
+      - "postgres:*"
+      - "redis:*"
+      - "nginx:*"
+      - "node:*"
+      - "python:*"

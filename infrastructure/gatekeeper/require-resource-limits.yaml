@@ -1,0 +1,78 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequireresourcelimits
+  annotations:
+    metadata.gatekeeper.sh/title: "Require Resource Limits"
+    metadata.gatekeeper.sh/version: 1.0.0
+    description: >-
+      Requires containers to have CPU and memory limits defined.
+      This prevents resource starvation and improves cluster stability.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireResourceLimits
+      validation:
+        type: object
+        properties:
+          exemptImages:
+            description: >-
+              List of image names that are exempt from this policy.
+            type: array
+            items:
+              type: string
+          limits:
+            description: >-
+              List of resource types that must have limits defined.
+            type: array
+            items:
+              type: string
+              enum: ["cpu", "memory"]
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequireresourcelimits
+        
+        import rego.v1
+        
+        violation[{"msg": msg}] if {
+            container := input.review.object.spec.containers[_]
+            not exempt_image(container.image)
+            required_limit := input.parameters.limits[_]
+            not container.resources.limits[required_limit]
+            msg := sprintf("Container %v is missing required resource limit: %v", [container.name, required_limit])
+        }
+        
+        violation[{"msg": msg}] if {
+            container := input.review.object.spec.initContainers[_]
+            not exempt_image(container.image)
+            required_limit := input.parameters.limits[_]
+            not container.resources.limits[required_limit]
+            msg := sprintf("Init container %v is missing required resource limit: %v", [container.name, required_limit])
+        }
+        
+        exempt_image(image) if {
+            exempt_pattern := input.parameters.exemptImages[_]
+            glob.match(exempt_pattern, [], image)
+        }
+
+---
+apiVersion: config.gatekeeper.sh/v1alpha1
+kind: K8sRequireResourceLimits
+metadata:
+  name: require-cpu-memory-limits
+  namespace: gatekeeper-system
+spec:
+  match:
+    - excludedNamespaces: ["kube-system", "gatekeeper-system"]
+      kinds:
+        - apiGroups: [""]
+          kinds: ["Pod"]
+        - apiGroups: ["apps"]
+          kinds: ["Deployment", "ReplicaSet", "DaemonSet", "StatefulSet"]
+  parameters:
+    limits: ["cpu", "memory"]
+    exemptImages:
+      - "registry.k8s.io/pause:*"
+      - "k8s.gcr.io/pause:*"

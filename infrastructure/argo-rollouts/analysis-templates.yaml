@@ -1,0 +1,260 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: success-rate
+    # Success rate must be > 95%
+    successCondition: result[0] >= 0.95
+    failureCondition: result[0] < 0.90
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(rate(http_requests_total{service="{{args.service-name}}",code!~"5.."}[5m])) /
+          sum(rate(http_requests_total{service="{{args.service-name}}"}[5m]))
+    interval: 30s
+    count: 10
+    failureLimit: 3
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency-p95
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: latency-p95
+    # 95th percentile latency must be < 2 seconds
+    successCondition: result[0] < 2000
+    failureCondition: result[0] > 5000
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_milliseconds_bucket{service="{{args.service-name}}"}[5m])) by (le)
+          )
+    interval: 30s
+    count: 10
+    failureLimit: 3
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: workflow-failure-rate
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: workflow-failure-rate
+    # Workflow failure rate must be < 5%
+    successCondition: result[0] < 0.05
+    failureCondition: result[0] > 0.10
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(rate(workflow_executions_total{service="{{args.service-name}}",status="failed"}[5m])) /
+          sum(rate(workflow_executions_total{service="{{args.service-name}}"}[5m]))
+    interval: 30s
+    count: 10
+    failureLimit: 2
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: cpu-usage
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: cpu-usage
+    # CPU usage should be < 80%
+    successCondition: result[0] < 0.80
+    failureCondition: result[0] > 0.95
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(rate(container_cpu_usage_seconds_total{pod=~"{{args.service-name}}-.*"}[5m])) /
+          sum(container_spec_cpu_quota{pod=~"{{args.service-name}}-.*"} / container_spec_cpu_period{pod=~"{{args.service-name}}-.*"})
+    interval: 30s
+    count: 10
+    failureLimit: 3
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: memory-usage
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: memory-usage
+    # Memory usage should be < 85%
+    successCondition: result[0] < 0.85
+    failureCondition: result[0] > 0.95
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(container_memory_working_set_bytes{pod=~"{{args.service-name}}-.*"}) /
+          sum(container_spec_memory_limit_bytes{pod=~"{{args.service-name}}-.*"})
+    interval: 30s
+    count: 10
+    failureLimit: 3
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: error-budget
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  - name: error-budget-threshold
+    value: "0.99"
+  metrics:
+  - name: error-budget
+    # Error budget based on SLO (99% availability)
+    successCondition: result[0] >= {{args.error-budget-threshold}}
+    failureCondition: result[0] < 0.95
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          (
+            sum(rate(http_requests_total{service="{{args.service-name}}",code!~"5.."}[30m])) +
+            sum(rate(workflow_executions_total{service="{{args.service-name}}",status="completed"}[30m]))
+          ) /
+          (
+            sum(rate(http_requests_total{service="{{args.service-name}}"}[30m])) +
+            sum(rate(workflow_executions_total{service="{{args.service-name}}"}[30m]))
+          )
+    interval: 60s
+    count: 5
+    failureLimit: 2
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: custom-metrics-check
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: database-connections
+    # Database connection pool usage < 80%
+    successCondition: result[0] < 0.80
+    failureCondition: result[0] > 0.90
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(database_connections_active{service="{{args.service-name}}"}) /
+          sum(database_connections_max{service="{{args.service-name}}"})
+    interval: 30s
+    count: 10
+    failureLimit: 3
+    
+  - name: redis-latency
+    # Redis latency < 10ms
+    successCondition: result[0] < 10
+    failureCondition: result[0] > 50
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          histogram_quantile(0.95,
+            sum(rate(redis_command_duration_seconds_bucket{service="{{args.service-name}}"}[5m])) by (le)
+          ) * 1000
+    interval: 30s
+    count: 10
+    failureLimit: 3
+    
+  - name: queue-depth
+    # Message queue depth < 1000
+    successCondition: result[0] < 1000
+    failureCondition: result[0] > 5000
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(queue_depth{service="{{args.service-name}}"})
+    interval: 30s
+    count: 10
+    failureLimit: 3
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: business-metrics
+  namespace: default
+spec:
+  args:
+  - name: service-name
+  - name: prometheus-server
+    value: http://prometheus.monitoring.svc.cluster.local:9090
+  metrics:
+  - name: automation-success-rate
+    # Business metric: automation success rate > 98%
+    successCondition: result[0] >= 0.98
+    failureCondition: result[0] < 0.95
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          sum(rate(automation_tasks_total{service="{{args.service-name}}",status="success"}[10m])) /
+          sum(rate(automation_tasks_total{service="{{args.service-name}}"}[10m]))
+    interval: 60s
+    count: 5
+    failureLimit: 2
+    
+  - name: user-satisfaction-score
+    # User satisfaction (based on API response times and errors)
+    successCondition: result[0] >= 0.90
+    failureCondition: result[0] < 0.80
+    provider:
+      prometheus:
+        address: "{{args.prometheus-server}}"
+        query: |
+          (
+            sum(rate(http_requests_total{service="{{args.service-name}}",code="200"}[10m])) * 1.0 +
+            sum(rate(http_requests_total{service="{{args.service-name}}",code!~"[45].."}[10m])) * 0.5
+          ) /
+          sum(rate(http_requests_total{service="{{args.service-name}}"}[10m]))
+    interval: 60s
+    count: 5
+    failureLimit: 2

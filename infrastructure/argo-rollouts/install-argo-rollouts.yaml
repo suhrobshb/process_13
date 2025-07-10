@@ -1,0 +1,944 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-rollouts
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo-rollouts
+  namespace: argo-rollouts
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argo-rollouts
+rules:
+- apiGroups:
+  - argoproj.io
+  resources:
+  - rollouts
+  - rollouts/status
+  - rollouts/finalizers
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - argoproj.io
+  resources:
+  - analysisruns
+  - analysisruns/status
+  - analysisruns/finalizers
+  - experiments
+  - experiments/status
+  - experiments/finalizers
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - argoproj.io
+  resources:
+  - analysistemplates
+  - clusteranalysistemplates
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - replicasets
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  - extensions
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
+- apiGroups:
+  - extensions
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/eviction
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - update
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - update
+- apiGroups:
+  - networking.istio.io
+  resources:
+  - virtualservices
+  - destinationrules
+  verbs:
+  - watch
+  - get
+  - update
+  - patch
+  - list
+- apiGroups:
+  - split.smi-spec.io
+  resources:
+  - trafficsplits
+  verbs:
+  - create
+  - watch
+  - get
+  - update
+  - patch
+- apiGroups:
+  - getambassador.io
+  - x.getambassador.io
+  resources:
+  - mappings
+  - ambassadormappings
+  verbs:
+  - create
+  - watch
+  - get
+  - update
+  - list
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  verbs:
+  - get
+- apiGroups:
+  - elbv2.k8s.aws
+  resources:
+  - targetgroupbindings
+  verbs:
+  - list
+  - get
+- apiGroups:
+  - appmesh.k8s.aws
+  resources:
+  - virtualnodes
+  - virtualrouters
+  verbs:
+  - watch
+  - get
+  - list
+- apiGroups:
+  - appmesh.k8s.aws
+  resources:
+  - virtualservices
+  verbs:
+  - watch
+  - get
+  - list
+  - update
+  - patch
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argo-rollouts
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: argo-rollouts
+subjects:
+- kind: ServiceAccount
+  name: argo-rollouts
+  namespace: argo-rollouts
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: argo-rollouts-metrics
+  namespace: argo-rollouts
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: argo-rollouts-metrics
+    app.kubernetes.io/part-of: argo-rollouts
+spec:
+  ports:
+  - name: metrics
+    port: 8090
+    protocol: TCP
+    targetPort: 8090
+  selector:
+    app.kubernetes.io/name: argo-rollouts
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argo-rollouts
+  namespace: argo-rollouts
+  labels:
+    app.kubernetes.io/component: rollouts-controller
+    app.kubernetes.io/name: argo-rollouts
+    app.kubernetes.io/part-of: argo-rollouts
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: argo-rollouts
+    spec:
+      containers:
+      - args:
+        - --leader-elect
+        - --healthz-port=8080
+        - --metrics-port=8090
+        - --loglevel=info
+        - --logformat=text
+        - --instanceid=argo-rollouts
+        - --electionsuffix=controller
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        image: quay.io/argoproj/argo-rollouts:v1.6.0
+        imagePullPolicy: Always
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 10
+        name: argo-rollouts
+        ports:
+        - containerPort: 8080
+          name: healthz
+        - containerPort: 8090
+          name: metrics
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+      serviceAccountName: argo-rollouts
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+  name: analysisruns.argoproj.io
+spec:
+  group: argoproj.io
+  names:
+    kind: AnalysisRun
+    listKind: AnalysisRunList
+    plural: analysisruns
+    shortNames:
+    - ar
+    singular: analysisrun
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              args:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+                    valueFrom:
+                      properties:
+                        secretKeyRef:
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
+              metrics:
+                items:
+                  properties:
+                    consecutiveErrorLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    count:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    failureCondition:
+                      type: string
+                    failureLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    inconclusiveLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    initialDelay:
+                      type: string
+                    interval:
+                      type: string
+                    name:
+                      type: string
+                    provider:
+                      properties:
+                        datadog:
+                          properties:
+                            apiVersion:
+                              type: string
+                            interval:
+                              type: string
+                            query:
+                              type: string
+                          required:
+                          - query
+                          type: object
+                        job:
+                          properties:
+                            metadata:
+                              type: object
+                            spec:
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                          required:
+                          - spec
+                          type: object
+                        kayenta:
+                          properties:
+                            address:
+                              type: string
+                            application:
+                              type: string
+                            canaryConfigName:
+                              type: string
+                            metricsAccountName:
+                              type: string
+                            scopes:
+                              items:
+                                properties:
+                                  controlLocation:
+                                    type: string
+                                  controlScope:
+                                    type: string
+                                  experimentLocation:
+                                    type: string
+                                  experimentScope:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - controlScope
+                                - experimentScope
+                                - name
+                                type: object
+                              type: array
+                            storageAccountName:
+                              type: string
+                            threshold:
+                              properties:
+                                marginal:
+                                  type: integer
+                                pass:
+                                  type: integer
+                              required:
+                              - marginal
+                              - pass
+                              type: object
+                          required:
+                          - address
+                          - application
+                          - canaryConfigName
+                          - metricsAccountName
+                          - scopes
+                          - storageAccountName
+                          - threshold
+                          type: object
+                        newRelic:
+                          properties:
+                            profile:
+                              type: string
+                            query:
+                              type: string
+                          required:
+                          - profile
+                          - query
+                          type: object
+                        prometheus:
+                          properties:
+                            address:
+                              type: string
+                            query:
+                              type: string
+                            timeout:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                          required:
+                          - address
+                          - query
+                          type: object
+                        wavefront:
+                          properties:
+                            address:
+                              type: string
+                            query:
+                              type: string
+                          required:
+                          - address
+                          - query
+                          type: object
+                        web:
+                          properties:
+                            body:
+                              type: string
+                            headers:
+                              items:
+                                properties:
+                                  key:
+                                    type: string
+                                  value:
+                                    type: string
+                                required:
+                                - key
+                                - value
+                                type: object
+                              type: array
+                            insecure:
+                              type: boolean
+                            jsonPath:
+                              type: string
+                            method:
+                              enum:
+                              - GET
+                              - POST
+                              type: string
+                            timeoutSeconds:
+                              type: integer
+                            url:
+                              type: string
+                          required:
+                          - url
+                          type: object
+                      type: object
+                    successCondition:
+                      type: string
+                  required:
+                  - name
+                  - provider
+                  type: object
+                type: array
+              terminate:
+                type: boolean
+            required:
+            - metrics
+            type: object
+          status:
+            properties:
+              message:
+                type: string
+              metricResults:
+                items:
+                  properties:
+                    consecutiveError:
+                      type: integer
+                    count:
+                      type: integer
+                    error:
+                      type: integer
+                    failed:
+                      type: integer
+                    inconclusive:
+                      type: integer
+                    measurements:
+                      items:
+                        properties:
+                          finishedAt:
+                            format: date-time
+                            type: string
+                          message:
+                            type: string
+                          phase:
+                            type: string
+                          resumeAt:
+                            format: date-time
+                            type: string
+                          startedAt:
+                            format: date-time
+                            type: string
+                          value:
+                            type: string
+                        type: object
+                      type: array
+                    message:
+                      type: string
+                    name:
+                      type: string
+                    phase:
+                      type: string
+                    successful:
+                      type: integer
+                  required:
+                  - name
+                  - phase
+                  type: object
+                type: array
+              phase:
+                type: string
+              runSummary:
+                properties:
+                  count:
+                    type: integer
+                  error:
+                    type: integer
+                  failed:
+                    type: integer
+                  inconclusive:
+                    type: integer
+                  successful:
+                    type: integer
+                type: object
+              startedAt:
+                format: date-time
+                type: string
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+  name: analysistemplates.argoproj.io
+spec:
+  group: argoproj.io
+  names:
+    kind: AnalysisTemplate
+    listKind: AnalysisTemplateList
+    plural: analysistemplates
+    shortNames:
+    - at
+    singular: analysistemplate
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              args:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    value:
+                      type: string
+                    valueFrom:
+                      properties:
+                        secretKeyRef:
+                          properties:
+                            key:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
+              metrics:
+                items:
+                  properties:
+                    consecutiveErrorLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    count:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    failureCondition:
+                      type: string
+                    failureLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    inconclusiveLimit:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    initialDelay:
+                      type: string
+                    interval:
+                      type: string
+                    name:
+                      type: string
+                    provider:
+                      properties:
+                        datadog:
+                          properties:
+                            apiVersion:
+                              type: string
+                            interval:
+                              type: string
+                            query:
+                              type: string
+                          required:
+                          - query
+                          type: object
+                        job:
+                          properties:
+                            metadata:
+                              type: object
+                            spec:
+                              type: object
+                              x-kubernetes-preserve-unknown-fields: true
+                          required:
+                          - spec
+                          type: object
+                        kayenta:
+                          properties:
+                            address:
+                              type: string
+                            application:
+                              type: string
+                            canaryConfigName:
+                              type: string
+                            metricsAccountName:
+                              type: string
+                            scopes:
+                              items:
+                                properties:
+                                  controlLocation:
+                                    type: string
+                                  controlScope:
+                                    type: string
+                                  experimentLocation:
+                                    type: string
+                                  experimentScope:
+                                    type: string
+                                  name:
+                                    type: string
+                                required:
+                                - controlScope
+                                - experimentScope
+                                - name
+                                type: object
+                              type: array
+                            storageAccountName:
+                              type: string
+                            threshold:
+                              properties:
+                                marginal:
+                                  type: integer
+                                pass:
+                                  type: integer
+                              required:
+                              - marginal
+                              - pass
+                              type: object
+                          required:
+                          - address
+                          - application
+                          - canaryConfigName
+                          - metricsAccountName
+                          - scopes
+                          - storageAccountName
+                          - threshold
+                          type: object
+                        newRelic:
+                          properties:
+                            profile:
+                              type: string
+                            query:
+                              type: string
+                          required:
+                          - profile
+                          - query
+                          type: object
+                        prometheus:
+                          properties:
+                            address:
+                              type: string
+                            query:
+                              type: string
+                            timeout:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                          required:
+                          - address
+                          - query
+                          type: object
+                        wavefront:
+                          properties:
+                            address:
+                              type: string
+                            query:
+                              type: string
+                          required:
+                          - address
+                          - query
+                          type: object
+                        web:
+                          properties:
+                            body:
+                              type: string
+                            headers:
+                              items:
+                                properties:
+                                  key:
+                                    type: string
+                                  value:
+                                    type: string
+                                required:
+                                - key
+                                - value
+                                type: object
+                              type: array
+                            insecure:
+                              type: boolean
+                            jsonPath:
+                              type: string
+                            method:
+                              enum:
+                              - GET
+                              - POST
+                              type: string
+                            timeoutSeconds:
+                              type: integer
+                            url:
+                              type: string
+                          required:
+                          - url
+                          type: object
+                      type: object
+                    successCondition:
+                      type: string
+                  required:
+                  - name
+                  - provider
+                  type: object
+                type: array
+            required:
+            - metrics
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.4.1
+  name: rollouts.argoproj.io
+spec:
+  group: argoproj.io
+  names:
+    kind: Rollout
+    listKind: RolloutList
+    plural: rollouts
+    shortNames:
+    - ro
+    singular: rollout
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.replicas
+      name: Desired
+      type: integer
+    - jsonPath: .status.replicas
+      name: Current
+      type: integer
+    - jsonPath: .status.updatedReplicas
+      name: Up-to-date
+      type: integer
+    - jsonPath: .status.availableReplicas
+      name: Available
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      scale:
+        labelSelectorPath: .status.selector
+        specReplicasPath: .spec.replicas
+        statusReplicasPath: .status.HPAReplicas
+      status: {}
