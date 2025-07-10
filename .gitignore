@@ -50,4 +50,9 @@ celerybeat-schedule
 
 # Project specific
 storage/users/*
-!storage/users/.gitkeep 
+!storage/users/.gitkeep
+
+# Generated reports (CI artifacts)
+*_coverage_report.json
+*_analysis_report.json
+*_test_report.json 

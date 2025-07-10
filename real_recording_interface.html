@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Action Recording Interface</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .recording-controls {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .btn {
+            padding: 15px 30px;
+            margin: 10px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn-start {
+            background-color: #27ae60;
+            color: white;
+        }
+        .btn-start:hover {
+            background-color: #2ecc71;
+        }
+        .btn-stop {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .btn-stop:hover {
+            background-color: #c0392b;
+        }
+        .status {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: bold;
+        }
+        .status.idle {
+            background-color: #ecf0f1;
+            color: #2c3e50;
+        }
+        .status.recording {
+            background-color: #e8f5e8;
+            color: #27ae60;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        .instructions {
+            background-color: #e8f4fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .instructions h3 {
+            color: #2980b9;
+            margin-top: 0;
+        }
+        .server-status {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .server-status .status-item {
+            padding: 5px 10px;
+            border-radius: 5px;
+            background-color: #ecf0f1;
+        }
+        .server-status .online {
+            background-color: #d5f4e6;
+            color: #27ae60;
+        }
+        .server-status .offline {
+            background-color: #fadbd8;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 Real Action Recording System</h1>
+        
+        <div class="server-status">
+            <div class="status-item" id="api-status">API Server: Checking...</div>
+            <div class="status-item" id="agent-status">Agent: Checking...</div>
+        </div>
+
+        <div class="status idle" id="recording-status">
+            Ready to record your actions
+        </div>
+
+        <div class="recording-controls">
+            <button class="btn btn-start" id="start-btn" onclick="startRecording()">
+                🔴 Start Recording
+            </button>
+            <button class="btn btn-stop" id="stop-btn" onclick="stopRecording()" disabled>
+                ⏹️ Stop Recording
+            </button>
+        </div>
+
+        <div class="instructions">
+            <h3>📋 How to Record Your Actions:</h3>
+            <ol>
+                <li><strong>Click "Start Recording"</strong> - The system will begin capturing your screen and actions</li>
+                <li><strong>Perform your tasks</strong> - Do whatever workflow you want to automate:
+                    <ul>
+                        <li>Open applications</li>
+                        <li>Click buttons and links</li>
+                        <li>Type text and fill forms</li>
+                        <li>Navigate between windows</li>
+                    </ul>
+                </li>
+                <li><strong>Click "Stop Recording"</strong> - This will save your recording and process it</li>
+                <li><strong>Review the generated workflow</strong> - The AI will create an automation from your actions</li>
+            </ol>
+            <p><strong>Note:</strong> This records your actual screen and keyboard/mouse actions, not a demo!</p>
+        </div>
+
+        <div id="output"></div>
+    </div>
+
+    <script>
+        let isRecording = false;
+
+        // Check server status
+        async function checkServerStatus() {
+            // Check API server
+            try {
+                const apiResponse = await fetch('http://127.0.0.1:8001/health');
+                if (apiResponse.ok) {
+                    document.getElementById('api-status').textContent = 'API Server: Online';
+                    document.getElementById('api-status').className = 'status-item online';
+                } else {
+                    throw new Error('API server not responding');
+                }
+            } catch (error) {
+                document.getElementById('api-status').textContent = 'API Server: Offline';
+                document.getElementById('api-status').className = 'status-item offline';
+            }
+
+            // Check agent server
+            try {
+                const agentResponse = await fetch('http://127.0.0.1:8002/');
+                if (agentResponse.ok) {
+                    document.getElementById('agent-status').textContent = 'Agent: Online';
+                    document.getElementById('agent-status').className = 'status-item online';
+                } else {
+                    throw new Error('Agent server not responding');
+                }
+            } catch (error) {
+                document.getElementById('agent-status').textContent = 'Agent: Offline';
+                document.getElementById('agent-status').className = 'status-item offline';
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const response = await fetch('http://127.0.0.1:8002/start', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    isRecording = true;
+                    
+                    document.getElementById('recording-status').textContent = '🔴 Recording in progress... Perform your actions now!';
+                    document.getElementById('recording-status').className = 'status recording';
+                    document.getElementById('start-btn').disabled = true;
+                    document.getElementById('stop-btn').disabled = false;
+                    
+                    document.getElementById('output').innerHTML = `
+                        <div style="background: #e8f5e8; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                            <strong>✅ Recording Started!</strong><br>
+                            Status: ${result.status}<br>
+                            The system is now capturing your screen and input actions.
+                        </div>
+                    `;
+                } else {
+                    throw new Error('Failed to start recording');
+                }
+            } catch (error) {
+                document.getElementById('output').innerHTML = `
+                    <div style="background: #fadbd8; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                        <strong>❌ Error:</strong> ${error.message}<br>
+                        Make sure the agent server is running on port 8002.
+                    </div>
+                `;
+            }
+        }
+
+        async function stopRecording() {
+            try {
+                const response = await fetch('http://127.0.0.1:8002/stop', {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    isRecording = false;
+                    
+                    document.getElementById('recording-status').textContent = 'Recording completed! Processing...';
+                    document.getElementById('recording-status').className = 'status idle';
+                    document.getElementById('start-btn').disabled = false;
+                    document.getElementById('stop-btn').disabled = true;
+                    
+                    document.getElementById('output').innerHTML = `
+                        <div style="background: #e8f4fd; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                            <strong>✅ Recording Stopped!</strong><br>
+                            Status: ${result.status}<br>
+                            Output Directory: ${result.output_dir}<br>
+                            Upload Status: ${result.upload_status}<br><br>
+                            <strong>Your actions have been recorded and will be processed into an automated workflow!</strong>
+                        </div>
+                    `;
+                } else {
+                    throw new Error('Failed to stop recording');
+                }
+            } catch (error) {
+                document.getElementById('output').innerHTML = `
+                    <div style="background: #fadbd8; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                        <strong>❌ Error:</strong> ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Check server status on load
+        checkServerStatus();
+        setInterval(checkServerStatus, 10000); // Check every 10 seconds
+    </script>
+</body>
+</html>
