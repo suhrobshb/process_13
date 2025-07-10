@@ -46,6 +46,10 @@ requests>=2.31.0
 # Added from the code block
 sqlmodel
 
+# New dependencies for enhanced functionality
+websockets>=10.0
+aiofiles>=0.8.0
+
 # Automation extras (low-level input capture for recording)
 evdev-binary
 
@@ -77,3 +81,6 @@ responses>=0.25.0
 # Browser automation & playwright helpers
 playwright>=1.42.0
 pytest-playwright>=0.4.4
+
+# Security dependencies
+restrictedpython>=5.2
