@@ -1,0 +1,216 @@
+groups:
+  - name: workflow_alerts
+    rules:
+      # High workflow failure rate alert
+      - alert: HighWorkflowFailureRate
+        expr: |
+          (
+            rate(ai_engine_workflow_executions_total{status="failed"}[5m]) /
+            rate(ai_engine_workflow_executions_total[5m])
+          ) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          component: workflow_engine
+          team: platform
+        annotations:
+          summary: "High workflow failure rate detected"
+          description: |
+            Workflow failure rate is {{ $value | humanizePercentage }} over the last 5 minutes.
+            This indicates potential issues with workflow execution or external dependencies.
+            Instance: {{ $labels.instance }}
+
+      # Critical workflow failure rate alert
+      - alert: CriticalWorkflowFailureRate
+        expr: |
+          (
+            rate(ai_engine_workflow_executions_total{status="failed"}[5m]) /
+            rate(ai_engine_workflow_executions_total[5m])
+          ) > 0.25
+        for: 1m
+        labels:
+          severity: critical
+          component: workflow_engine
+          team: platform
+        annotations:
+          summary: "Critical workflow failure rate detected"
+          description: |
+            Workflow failure rate is {{ $value | humanizePercentage }} over the last 5 minutes.
+            This is a critical issue requiring immediate attention.
+            Instance: {{ $labels.instance }}
+
+      # Workflow execution latency alert
+      - alert: HighWorkflowExecutionLatency
+        expr: |
+          histogram_quantile(0.95, 
+            rate(ai_engine_workflow_execution_duration_seconds_bucket[5m])
+          ) > 300
+        for: 3m
+        labels:
+          severity: warning
+          component: workflow_engine
+          team: platform
+        annotations:
+          summary: "High workflow execution latency"
+          description: |
+            95th percentile workflow execution time is {{ $value }}s over the last 5 minutes.
+            This may indicate performance issues or resource constraints.
+            Instance: {{ $labels.instance }}
+
+      # Low workflow throughput alert
+      - alert: LowWorkflowThroughput
+        expr: |
+          rate(ai_engine_workflow_executions_total[5m]) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: workflow_engine
+          team: platform
+        annotations:
+          summary: "Low workflow execution throughput"
+          description: |
+            Workflow execution rate is {{ $value }} executions/second over the last 5 minutes.
+            This may indicate reduced system activity or potential issues.
+            Instance: {{ $labels.instance }}
+
+      # Workflow engine service down
+      - alert: WorkflowEngineDown
+        expr: up{job="ai-engine-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: workflow_engine
+          team: platform
+        annotations:
+          summary: "Workflow engine service is down"
+          description: |
+            The AI Engine API service is not responding.
+            This will prevent all workflow executions.
+            Instance: {{ $labels.instance }}
+
+      # SLA breach alert (if execution time exceeds expected SLA)
+      - alert: WorkflowSLABreach
+        expr: |
+          histogram_quantile(0.90,
+            rate(ai_engine_workflow_execution_duration_seconds_bucket[10m])
+          ) > 600
+        for: 2m
+        labels:
+          severity: warning
+          component: workflow_engine
+          team: platform
+          sla: "10min"
+        annotations:
+          summary: "Workflow SLA breach detected"
+          description: |
+            90th percentile workflow execution time ({{ $value }}s) exceeds 10-minute SLA.
+            This may impact user experience and service quality.
+            Instance: {{ $labels.instance }}
+
+      # Specific runner failure rate alerts
+      - alert: HighDesktopRunnerFailureRate
+        expr: |
+          (
+            rate(ai_engine_runner_executions_total{runner_type="desktop",status="failed"}[5m]) /
+            rate(ai_engine_runner_executions_total{runner_type="desktop"}[5m])
+          ) > 0.15
+        for: 3m
+        labels:
+          severity: warning
+          component: desktop_runner
+          team: platform
+        annotations:
+          summary: "High desktop runner failure rate"
+          description: |
+            Desktop runner failure rate is {{ $value | humanizePercentage }}.
+            This may indicate issues with GUI automation or display environments.
+            Instance: {{ $labels.instance }}
+
+      - alert: HighBrowserRunnerFailureRate
+        expr: |
+          (
+            rate(ai_engine_runner_executions_total{runner_type="browser",status="failed"}[5m]) /
+            rate(ai_engine_runner_executions_total{runner_type="browser"}[5m])
+          ) > 0.15
+        for: 3m
+        labels:
+          severity: warning
+          component: browser_runner
+          team: platform
+        annotations:
+          summary: "High browser runner failure rate"
+          description: |
+            Browser runner failure rate is {{ $value | humanizePercentage }}.
+            This may indicate issues with Playwright or web automation.
+            Instance: {{ $labels.instance }}
+
+      # LLM API failure rate alert
+      - alert: HighLLMAPIFailureRate
+        expr: |
+          (
+            rate(ai_engine_llm_requests_total{status="failure"}[5m]) /
+            rate(ai_engine_llm_requests_total[5m])
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          component: llm_runner
+          team: platform
+        annotations:
+          summary: "High LLM API failure rate"
+          description: |
+            LLM API failure rate is {{ $value | humanizePercentage }}.
+            This may indicate issues with OpenAI/Anthropic APIs or network connectivity.
+            Provider: {{ $labels.provider }}
+            Instance: {{ $labels.instance }}
+
+      # Database connection issues
+      - alert: DatabaseConnectionFailures
+        expr: |
+          rate(ai_engine_database_errors_total[5m]) > 0.01
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+          team: platform
+        annotations:
+          summary: "Database connection failures detected"
+          description: |
+            Database error rate is {{ $value }} errors/second.
+            This indicates potential database connectivity or performance issues.
+            Instance: {{ $labels.instance }}
+
+      # Memory usage alert for workflow engine
+      - alert: HighMemoryUsage
+        expr: |
+          (process_resident_memory_bytes{job="ai-engine-api"} / 1024 / 1024) > 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: workflow_engine
+          team: platform
+        annotations:
+          summary: "High memory usage in workflow engine"
+          description: |
+            Workflow engine memory usage is {{ $value }}MB.
+            This may indicate memory leaks or resource-intensive workflows.
+            Instance: {{ $labels.instance }}
+
+      # Disk space alert for storage
+      - alert: LowDiskSpace
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/"} / 
+            node_filesystem_size_bytes{mountpoint="/"}
+          ) < 0.1
+        for: 5m
+        labels:
+          severity: critical
+          component: storage
+          team: platform
+        annotations:
+          summary: "Low disk space on workflow engine"
+          description: |
+            Available disk space is {{ $value | humanizePercentage }}.
+            This may impact workflow recording and log storage.
+            Instance: {{ $labels.instance }}

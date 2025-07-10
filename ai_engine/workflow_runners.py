@@ -622,17 +622,21 @@ class RunnerFactory:
             "rag_decision": RAGDecisionRunner,
             "desktop": None,
             "browser": None,
+            "enhanced_llm": None,
         }
         
         step_key = step_type.lower()
-        if step_key in ("desktop", "browser") and runners[step_key] is None:
+        if step_key in ("desktop", "browser", "enhanced_llm") and runners[step_key] is None:
             try:
                 if step_key == "desktop":
                     from ai_engine.enhanced_runners.desktop_runner import DesktopRunner
                     runners["desktop"] = DesktopRunner
-                else:
+                elif step_key == "browser":
                     from ai_engine.enhanced_runners.browser_runner import BrowserRunner
                     runners["browser"] = BrowserRunner
+                elif step_key == "enhanced_llm":
+                    from ai_engine.enhanced_runners.llm_runner import LLMRunner as EnhancedLLMRunner
+                    runners["enhanced_llm"] = EnhancedLLMRunner
             except ModuleNotFoundError as exc:
                 raise ValueError(
                     f"Runner type '{step_type}' requires optional dependencies that are not installed."
