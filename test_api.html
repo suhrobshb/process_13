@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Driven RPA Platform - API Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2563eb;
+            margin-bottom: 30px;
+        }
+        .api-test {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8fafc;
+            border-radius: 8px;
+            border-left: 4px solid #2563eb;
+        }
+        .api-test h3 {
+            margin-top: 0;
+            color: #1e293b;
+        }
+        .response {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            overflow-x: auto;
+        }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .status.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 AI-Driven RPA Platform</h1>
+        <p>API Server: <span id="api-status" class="status">Checking...</span></p>
+        
+        <div class="api-test">
+            <h3>Dashboard Statistics</h3>
+            <button onclick="testDashboard()">Test Dashboard API</button>
+            <div id="dashboard-response" class="response" style="display:none;"></div>
+        </div>
+
+        <div class="api-test">
+            <h3>System Health</h3>
+            <button onclick="testHealth()">Test Health API</button>
+            <div id="health-response" class="response" style="display:none;"></div>
+        </div>
+
+        <div class="api-test">
+            <h3>Recording Session</h3>
+            <button onclick="startRecording()">Start Recording</button>
+            <button onclick="stopRecording()">Stop Recording</button>
+            <div id="recording-response" class="response" style="display:none;"></div>
+        </div>
+
+        <div class="api-test">
+            <h3>Analytics Metrics</h3>
+            <button onclick="testAnalytics()">Test Analytics API</button>
+            <div id="analytics-response" class="response" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        // Check API status on load
+        window.addEventListener('load', checkAPIStatus);
+        
+        async function checkAPIStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/system/health`);
+                const data = await response.json();
+                document.getElementById('api-status').textContent = 'Online';
+                document.getElementById('api-status').className = 'status success';
+            } catch (error) {
+                document.getElementById('api-status').textContent = 'Offline';
+                document.getElementById('api-status').className = 'status error';
+            }
+        }
+
+        async function testDashboard() {
+            try {
+                const response = await fetch(`${API_BASE}/api/dashboard/stats`);
+                const data = await response.json();
+                showResponse('dashboard-response', data);
+            } catch (error) {
+                showResponse('dashboard-response', { error: error.message });
+            }
+        }
+
+        async function testHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/api/system/health`);
+                const data = await response.json();
+                showResponse('health-response', data);
+            } catch (error) {
+                showResponse('health-response', { error: error.message });
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const response = await fetch(`${API_BASE}/api/recording/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                showResponse('recording-response', data);
+            } catch (error) {
+                showResponse('recording-response', { error: error.message });
+            }
+        }
+
+        async function stopRecording() {
+            try {
+                const response = await fetch(`${API_BASE}/api/recording/stop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                showResponse('recording-response', data);
+            } catch (error) {
+                showResponse('recording-response', { error: error.message });
+            }
+        }
+
+        async function testAnalytics() {
+            try {
+                const response = await fetch(`${API_BASE}/api/analytics/metrics`);
+                const data = await response.json();
+                showResponse('analytics-response', data);
+            } catch (error) {
+                showResponse('analytics-response', { error: error.message });
+            }
+        }
+
+        function showResponse(elementId, data) {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.textContent = JSON.stringify(data, null, 2);
+        }
+    </script>
+</body>
+</html>

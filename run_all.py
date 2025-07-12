@@ -13,11 +13,11 @@ ROOT = pathlib.Path(__file__).parent.resolve()
 ENV  = os.environ.copy()
 ENV["PYTHONUNBUFFERED"] = "1"
 
-BACKEND_CMD_DEV  = ["uvicorn", "main:app", "--reload", "--port", "8000"]
-BACKEND_CMD_PROD = ["uvicorn", "main:app", "--workers", "4", "--port", "8000"]
+BACKEND_CMD_DEV  = ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+BACKEND_CMD_PROD = ["uvicorn", "main:app", "--workers", "4", "--host", "0.0.0.0", "--port", "8000"]
 
-UI_CMD_DEV       = ["npm", "run", "dev"]
-UI_CMD_PROD      = ["npm", "run", "start"]
+UI_CMD_DEV       = ["pnpm", "dev"]
+UI_CMD_PROD      = ["pnpm", "start"]
 
 RUNNER_CMD       = ["python", "-m", "ai_engine.runner_service"]
 
@@ -42,13 +42,22 @@ async def main():
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
         (ROOT / ".pw_installed").touch()
 
-    # Spin up Postgres if the user doesn't already have one (docker-in-docker friendly)
+    # Spin up lightweight Postgres if nothing is listening on 5432
     if os.system("pg_isready -q") != 0:
-        subprocess.run(["docker", "compose", "up", "-d", "postgres"], check=True)
+        print("Starting lightweight Postgres container...")
+        subprocess.run(["docker", "run", "-d", "--name", "process13-postgres", 
+                       "-e", "POSTGRES_PASSWORD=postgres", 
+                       "-e", "POSTGRES_DB=autoops", 
+                       "-p", "5432:5432", "postgres:13"], check=False)
 
     backend = BACKEND_CMD_PROD if args.prod else BACKEND_CMD_DEV
     ui      = UI_CMD_PROD      if args.prod else UI_CMD_DEV
 
+    print(f"🚀 Starting platform...")
+    print(f"   API:  http://localhost:8000")
+    print(f"   UI:   http://localhost:3000")
+    print(f"   Stop: Ctrl+C\n")
+    
     await asyncio.gather(
         run("API ", backend),
         run("UI  ", ui, ROOT / "dashboard_ui_v2"),

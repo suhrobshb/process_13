@@ -55,4 +55,20 @@ storage/users/*
 # Generated reports (CI artifacts)
 *_coverage_report.json
 *_analysis_report.json
-*_test_report.json 
+*_test_report.json
+
+# Cache and temporary files
+.pytest_cache/
+.claude/
+__pycache__/
+*.pyc
+
+# Platform-specific files
+.replit
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log* 
